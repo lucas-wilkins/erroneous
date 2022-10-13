@@ -1,28 +1,137 @@
 from __future__ import annotations
 
+from typing import Dict, Any, Optional, Callable, List, Set
+
 from fractions import Fraction
+from collections import defaultdict
+
 import numpy as np
-from typing import Dict, Any, Optional
+
 
 class NonDifferentiableExpressionError(Exception):
     def __init__(self, msg):
         super.__init__(msg)
 
+class EvaluationError(Exception):
+    """ A problem with evaluating an expression"""
+    def __init__(self, msg):
+        super().__init__(msg)
+
+class SubstitutionError(Exception):
+    """ A problem with the substitution procedure"""
+    def __init__(self, msg):
+        super().__init__(msg)
+
+class MatchFailure(Exception):
+    """ Exception used to signal that a pattern does not match"""
+    def __init__(self, pattern, expression):
+        self.msg = f"{pattern} does not match {expression}"
+        super().__init__(self.msg)
+
+
+class MatchError(Exception):
+    """ Something went wrong trying to match expressions """
+    def __init__(self, msg):
+        super().__init__(msg)
+
+
 class Expression:
 
-    # Functions for pattern matching
+    # Generally useful things for navigating an expression
 
     @property
-    def head(self):
+    def head(self) -> str:
         return self.__class__.__name__
 
     @property
-    def terms(self):
-        raise NotImplementedError(f"diff not implemented in {self.__class__.__name__}")
+    def terms(self) -> List[Expression]:
+        raise NotImplementedError(f"terms not implemented in {self.__class__.__name__}")
+
+    # Don't have a full-blown substitution system right now
+    def wildcard_substitute(self, wildcard_id: int, expression: Expression):
+        raise NotImplementedError(f"wildcard_substitute not implemented in {self.__class__.__name__}")
+
+    @property
+    def wildcard_numbers(self) -> Set[int]:
+        out = set()
+        for term in self.terms:
+            out.update(term.wildcard_numbers)
+        return out
+
+    def replace(self, source_pattern: Expression, target_pattern: Expression) -> Expression:
+        return self.substitute(source_pattern, target_pattern).simplify()
+
+    def substitute(self, source_pattern: Expression, target_pattern: Expression) -> Expression:
+        # Check that the other doesn't contain wildcards not in the original
+        bad_wildcards = target_pattern.wildcard_numbers.difference(source_pattern.wildcard_numbers)
+        if len(bad_wildcards) > 0:
+            raise SubstitutionError(f"Target expression contains wildcards not in source expression ({bad_wildcards})")
+
+        print(f"Attempting substution in {self.short_string()}:", end="")
+        print(f"  {source_pattern.short_string()} -> {target_pattern.short_string()}")
+
+        return self._substitute(source_pattern, target_pattern)
+
+    def _substitute(self, source_pattern: Expression, target_pattern: Expression) -> Expression:
+        raise NotImplementedError(f"{self.__class__.__name__} does not implement _substitute")
+
+    def simplify(self) -> Expression:
+        # TODO: Write the simplification procedure
+        return self
+
+    def match(self, expression: Expression) -> Optional[Dict[int, Expression]]:
+        # Check that `expression` does not contain wildcards
+
+        if len(expression.wildcard_numbers) != 0:
+            raise MatchError("Wildcard in target expression")
+
+        try:
+            match_data = self._match(expression)
+
+            # If there are multiple uses of a wildcard, check their contents is the same
+            output_dict: Dict[int, Expression] = {}
+            for key in match_data:
+                if len(match_data[key]) > 1:
+                    ref = match_data[key][0]
+                    for other in match_data[key][1:]:
+                        ref.match(other)  # Should raise a MatchFailed exception if it doesn't work
+
+                output_dict[key] = match_data[key][0]
+            return output_dict
+
+        except MatchFailure:
+            return None
+
+    def _match(self, expression: Expression) -> Dict[int, List[Expression]]:
+
+        """
+        Recursively defined, matching failure indicated via an exception being raised
+
+        Overriden by special objects - Constant, Variable, Wildcard
+
+        """
+
+        if self.head != expression.head:  # Checks class name, not class object - probably good for serialisation
+            raise MatchFailure(self, expression)
+
+        # Recursively check internals
+        output_dict: Dict[int, List[Expression]] = defaultdict(list)
+        for p, e in zip(self.terms, expression.terms):
+            match_data = p._match(e)
+            for key in match_data:
+                output_dict[key] += match_data[key]
+
+        return output_dict
+
+    def matches(self, pattern: Expression) -> bool:
+        return self.match(pattern) is not None
 
     # Calculus
 
     def diff(self, term: Variable) -> Expression:
+        return self.fast_diff(term).simplify()
+
+    def fast_diff(self, term: Variable) -> Expression:
         if self.differentiable:
             return self._diff(term)
         else:
@@ -118,18 +227,43 @@ class Expression:
     def log(self):
         return Log(self)
 
-    def __abs__(self, other):
+    def __abs__(self):
         return Abs(self)
 
     def sign(self):
         return Sign(self)
 
+    #
+    # Comparisons
+    #
 
+    def full_identity(self, other):
+        raise NotImplementedError(f"{self.__class__.__name__} does not implement full_identity")
+
+    #
+    # Strings
+    #
+
+    def pretty_print(self, indent_str: str = "  ", file=None):
+        print(self.pretty_print_string(indent_str), file=file)
+
+    def pretty_print_string(self, indent_str: str = "  "):
+        return "\n".join(self._pretty_print_lines(indent_str))
+
+    def _pretty_print_lines(self, indent_str: str) -> List[str]:
+        raise NotImplementedError(f"`pretty_print` not implemented in {self.__class__.__name__}")
+
+    def short_string(self):
+        return repr(self)
+
+    def short_print(self, file=None):
+        print(self.short_string(), file=file)
 
 
 #
 # Helper classes
 #
+
 
 class Unary(Expression):
     """ Base class for unary expression components"""
@@ -139,8 +273,36 @@ class Unary(Expression):
     def __repr__(self):
         return f"{self.__class__.__name__}({self.a})"
 
-    def terms(self):
+    def terms(self) -> List[Expression]:
         return [self.a]
+
+    def wildcard_substitute(self, wildcard_id: int, expression: Expression):
+        return self.__class__(self.a.wildcard_substitute(wildcard_id, expression))
+
+    def _pretty_print_lines(self, indent_str) -> List[str]:
+        a_lines = self.a._pretty_print_lines(indent_str)
+        a_lines = [indent_str + line for line in a_lines]
+        a_lines[-1] += ")"
+        return [f"{self.__class__.__name__}("] + a_lines
+
+
+    def _substitute(self, source_pattern: Expression, target_pattern: Expression) -> Expression:
+
+        new_a = self.a._substitute(source_pattern, target_pattern)
+
+        new_self = self.__class__(new_a)
+
+        match_data = source_pattern.match(new_self)
+
+        if match_data is not None:
+            replacement = target_pattern
+            for key in match_data:
+                replacement = replacement.wildcard_substitute(key, match_data[key])
+
+            return replacement
+
+        else:
+            return new_self
 
 
 class Binary(Expression):
@@ -152,11 +314,49 @@ class Binary(Expression):
     def __repr__(self):
         return f"{self.__class__.__name__}({self.a}, {self.b})"
 
+    @property
+    def terms(self) -> List[Expression]:
+        return [self.a, self.b]
+
+    def wildcard_substitute(self, wildcard_id: int, expression: Expression):
+        return self.__class__(
+            self.a.wildcard_substitute(wildcard_id, expression),
+            self.b.wildcard_substitute(wildcard_id, expression))
+
+    def _pretty_print_lines(self, indent_str) -> List[str]:
+        a_lines = self.a._pretty_print_lines(indent_str)
+        a_lines = [indent_str + line for line in a_lines]
+        a_lines[-1] += ","
+        b_lines = self.b._pretty_print_lines(indent_str)
+        b_lines = [indent_str + line for line in b_lines]
+        b_lines[-1] += ")"
+
+        return [f"{self.__class__.__name__}("] + a_lines + b_lines
+
+    def _substitute(self, source_pattern: Expression, target_pattern: Expression) -> Expression:
+
+        new_a = self.a._substitute(source_pattern, target_pattern)
+        new_b = self.b._substitute(source_pattern, target_pattern)
+
+        new_self = self.__class__(new_a, new_b)
+
+        match_data = source_pattern.match(new_self)
+
+        if match_data is not None:
+            replacement = target_pattern
+            for key in match_data:
+                replacement = replacement.wildcard_substitute(key, match_data[key])
+
+            return replacement
+
+        else:
+            return new_self
 
 
 #
 # Special Expressions
 #
+
 
 class Constant(Expression):
     """ Represents a constant"""
@@ -169,8 +369,43 @@ class Constant(Expression):
         return repr(self.value)
 
     @property
-    def terms(self):
-        return [self.value]
+    def terms(self) -> List[Expression]:
+        return []
+
+    def wildcard_substitute(self, wildcard_id: int, expression: Expression):
+        return self
+
+    def _match(self, expression: Expression) -> Dict[int, List[Expression]]:
+        if not isinstance(expression, Constant):
+            raise MatchFailure(self, expression)
+
+        if self.value != expression.value:
+            raise MatchFailure(self, expression)
+
+        return {}
+
+    def _pretty_print_lines(self, indent_str: str) -> List[str]:
+        return [str(self.value)]
+
+    def _diff(self, term):
+        return Constant(0)
+
+    def __call__(self, x):
+        return self.value
+
+    def _substitute(self, source_pattern: Expression, target_pattern: Expression) -> Expression:
+
+        match_data = source_pattern.match(self)
+
+        if match_data is not None:
+            replacement = target_pattern
+            for key in match_data:
+                replacement = replacement.wildcard_substitute(key, match_data[key])
+
+            return replacement
+
+        else:
+            return self
 
 
 class Variable(Expression):
@@ -185,8 +420,49 @@ class Variable(Expression):
         return self.print_alias
 
     @property
-    def terms(self):
-        return [self.identity]
+    def terms(self) -> List[Expression]:
+        return []
+
+    def wildcard_substitute(self, wildcard_id: int, expression: Expression):
+        return self
+
+    def _match(self, expression: Expression) -> Dict[int, List[Expression]]:
+
+        if not isinstance(expression, Variable):
+            raise MatchFailure(self, expression)
+
+        if self.identity != expression.identity:
+            raise MatchFailure(self, expression)
+
+        return {}
+
+    def _pretty_print_lines(self, indent_str: str) -> List[str]:
+        return [self.print_alias]
+
+    def _diff(self, term: Variable):
+        if term.identity == self.identity:
+            return Constant(1)
+        else:
+            return Constant(0)
+
+    def __call__(self, x):
+        return x[self.identity]
+
+    def _substitute(self, source_pattern: Expression, target_pattern: Expression) -> Expression:
+
+        match_data = source_pattern.match(self)
+
+        if match_data is not None:
+            replacement = target_pattern
+            for key in match_data:
+                replacement = replacement.wildcard_substitute(key, match_data[key])
+
+            return replacement
+
+        else:
+            return self
+
+
 
 class Wildcard(Expression):
     def __init__(self, number):
@@ -200,13 +476,34 @@ class Wildcard(Expression):
         return f"#{self.number}"
 
     @property
-    def terms(self):
+    def terms(self) -> List[Expression]:
         return []
+
+    def wildcard_substitute(self, wildcard_id: int, expression: Expression):
+        if self.number == wildcard_id:
+            return expression
+        else:
+            return self
+
+    @property
+    def wildcard_numbers(self) -> Set[int]:
+        return {self.number}
+
+    def _match(self, expression: Expression):
+        return {self.number: [expression]}
+
+    def _pretty_print_lines(self, indent_str: str) -> List[str]:
+        return [f"<{self.number}>"]
+
+    def __call__(self, x):
+        raise EvaluationError("Wildcards cannot be evaluated")
+
+    def _substitute(self, source_pattern: Expression, target_pattern: Expression) -> Expression:
+        raise SubstitutionError("Attempted to substitute into expression with a wildcard")
 
 #
 # Standard algabraic operations
 #
-
 
 class Plus(Binary):
     def __init__(self, a: Expression, b: Expression):
@@ -217,6 +514,9 @@ class Plus(Binary):
 
     def __call__(self, x):
         return self.a(x) + self.b(x)
+
+    def short_string(self):
+        return f"({self.a.short_string()} + {self.b.short_string()})"
 
 
 class Minus(Binary):
@@ -229,6 +529,9 @@ class Minus(Binary):
     def __call__(self, x):
         return self.a(x) - self.b(x)
 
+    def short_string(self):
+        return f"({self.a.short_string()} - {self.b.short_string()})"
+
 
 class Neg(Unary):
     def __init__(self, a: Expression):
@@ -239,6 +542,9 @@ class Neg(Unary):
 
     def __call__(self, x):
         return -self.a(x)
+
+    def short_string(self):
+        return f"-{self.a.short_string()}"
 
 
 class Times(Binary):
@@ -258,6 +564,9 @@ class Times(Binary):
         return self.a(x) * self.b(x)
 
 
+    def short_string(self):
+        return f"({self.a.short_string()} * {self.b.short_string()})"
+
 class Divide(Binary):
     def __init__(self, a: Expression, b: Expression):
         super().__init__(a, b)
@@ -276,6 +585,8 @@ class Divide(Binary):
     def __call__(self, x):
         return self.a(x) / self.b(x)
 
+    def short_string(self):
+        return f"({self.a.short_string()} / {self.b.short_string()})"
 
 class Modulo(Binary):
     def __init__(self, a: Expression, b: Expression):
@@ -287,6 +598,8 @@ class Modulo(Binary):
     def __call__(self, x):
         return self.a(x) % self.b(x)
 
+    def short_string(self):
+        return f"({self.a.short_string()} % {self.b.short_string()})"
 
 class Power(Binary):
     def __init__(self, a: Expression, b: Expression):
@@ -320,6 +633,8 @@ class Power(Binary):
     def __call__(self, x):
         return self.a(x) ** self.b(x)
 
+    def short_string(self):
+        return f"({self.a.short_string()} ^ {self.b.short_string()})"
 
 class Exp(Unary):
     def __init__(self, a: Expression):
@@ -331,6 +646,8 @@ class Exp(Unary):
     def __call__(self, x):
         return np.exp(self.a(x))
 
+    def short_string(self):
+        return f"exp({self.a.short_string()})"
 
 class Log(Unary):
     def __init__(self, a: Expression):
@@ -342,6 +659,8 @@ class Log(Unary):
     def __call__(self, x):
         return np.log(self.a(x))
 
+    def short_string(self):
+        return f"log({self.a.short_string()})"
 #
 # Some less nice operations that should none-the-less be supported
 #
@@ -356,6 +675,9 @@ class Abs(Unary):
     def __call__(self, x):
         return np.log(self.a(x))
 
+    def short_string(self):
+        return f"abs({self.a.short_string()})"
+
 class Sign(Unary):
     def __init__(self, a: Expression):
         super().__init__(a)
@@ -365,6 +687,9 @@ class Sign(Unary):
 
     def __call__(self, x):
         return np.sign(self.a(x))
+
+    def short_string(self):
+        return f"sign({self.a.short_string()})"
 
 
 class Delta(Unary):
@@ -380,3 +705,7 @@ class Delta(Unary):
     @property
     def differentiable(self):
         return False
+
+    def short_string(self):
+        return f"delta({self.a.short_string()})"
+
