@@ -5,7 +5,7 @@ Erroneous: Tracking Statistical Dependencies, Calculating Better Errors
 Erroneous has multiple components
 * A token system for tracking statistical dependencies: Data Correlation Tokens (DCTs)
   * A specification for tokens
-  * Parsers to create, interpret and use the tokens
+  * Token readers and writers
 * Tools for making use of this tracking data, and providing related functionality
   * Calculating standard errors
   * Stochastic error calculations
