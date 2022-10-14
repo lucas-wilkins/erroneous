@@ -91,8 +91,7 @@ The following components operate on other data, so they have the following form
 
 The following is a table of the unary operations and their IDs
 
-.. list-table:: Unary Operations
-    :header-rows: 1
+.. list-table::
 
    * - Negation
      - 0x10
@@ -122,8 +121,7 @@ Binary components operate on other data, so they have the following form
 
 The following is a table of the binary operations and their IDs
 
-.. list-table:: Unary Operations
-    :header-rows: 1
+.. list-table::
 
    * - Addition
      - 0x40
