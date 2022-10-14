@@ -1,6 +1,6 @@
  
-Erroneous: Tracking Statistical Dependencies and Calculating Better Errors
-==========================================================================
+Erroneous: Tracking Statistical Dependencies, Calculating Better Errors
+=======================================================================
 
 Erroneous has multiple components
 * A token system for tracking statistical dependencies: Data Correlation Tokens (DCTs)
