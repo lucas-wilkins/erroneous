@@ -4,7 +4,7 @@ Erroneous: Tracking Statistical Dependencies, Calculating Better Errors
 
 Erroneous has multiple components
 * A token system for tracking statistical dependencies: Data Correlation Tokens (DCTs)
-  * A specification for tokens
+  * [A specification for tokens](schema/dct-0.rst)
   * Token readers and writers
 * Tools for making use of this tracking data, and providing related functionality
   * Calculating standard errors
@@ -58,6 +58,9 @@ A Solution
 A Standard
 ==========
 
+Scope: DCTs are intended to be used on data represents functional relationships, i.e. data which specifies
+(non-unique) output values for a list of (unique) input values, with errors and other statistical moments 
+(the latter being a more experimental future path).
 
 
 Data Integrity
