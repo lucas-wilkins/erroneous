@@ -11,7 +11,6 @@ import logging
 
 logger = logging.getLogger("expressions")
 
-
 class NonDifferentiableExpressionError(Exception):
     def __init__(self, msg):
         super.__init__(msg)
@@ -313,6 +312,8 @@ class Expression:
     def short_print(self, file=None):
         print(self.short_string(), file=file)
 
+
+#TODO: Add support for peicewise combinations
 
 #
 # Special Expressions
