@@ -79,11 +79,17 @@ class Expression:
     def _substitute(self, source_pattern: Expression, target_pattern: Expression) -> Expression:
         raise NotImplementedError(f"{self.__class__.__name__} does not implement _substitute")
 
+    def reduce_constants(self) -> Expression:
+        raise NotImplementedError(f"{self.__class__.__name__} does not implement reduce_constants")
+
     def simplify(self, max_iters=100) -> Expression:
         last_expression = self
         new_expression = self
         for i in range(max_iters):
 
+            new_expression = new_expression.reduce_constants()
+
+            # Try all the simplifyiing substitutions once again
             for source, target in simplification_substitutions:
                 new_expression = new_expression.substitute(source, target)
 
@@ -97,6 +103,21 @@ class Expression:
             logger.warning(f"Reached max_iters (={max_iters}) in simplification.")
 
         return last_expression
+
+    def reduce_constants(self):
+        """ Attempt to reduce the prevelance of constants,
+        this basically unwraps the constant values,
+        and evaluates the expressions again"""
+        reduced = self._reduce_constants()
+
+        if isinstance(reduced, Expression):
+            return reduced
+        else:
+            # Must be a number
+            return Constant(reduced)
+
+    def _reduce_constants(self):
+        raise NotImplementedError(f"reduce_constants not implemented in {self.__class__.__name__}")
 
     def match(self, expression: Expression) -> Optional[Dict[int, Expression]]:
         # Check that `expression` does not contain wildcards
@@ -283,105 +304,6 @@ class Expression:
 
 
 #
-# Helper classes
-#
-
-
-class Unary(Expression):
-    """ Base class for unary expression components"""
-    def __init__(self, a: Any):
-        self.a = Expression._sanitise(a)
-
-    def __repr__(self):
-        return f"{self.__class__.__name__}({self.a})"
-
-    @property
-    def terms(self) -> List[Expression]:
-        return [self.a]
-
-    def wildcard_substitute(self, wildcard_id: int, expression: Expression):
-        return self.__class__(self.a.wildcard_substitute(wildcard_id, expression))
-
-    def _pretty_print_lines(self, indent_str) -> List[str]:
-        a_lines = self.a._pretty_print_lines(indent_str)
-        a_lines = [indent_str + line for line in a_lines]
-        a_lines[-1] += ")"
-        return [f"{self.__class__.__name__}("] + a_lines
-
-
-    def _substitute(self, source_pattern: Expression, target_pattern: Expression) -> Expression:
-
-        new_a = self.a._substitute(source_pattern, target_pattern)
-
-        new_self = self.__class__(new_a)
-
-        match_data = source_pattern.match(new_self)
-
-        if match_data is not None:
-            replacement = target_pattern
-            for key in match_data:
-                replacement = replacement.wildcard_substitute(key, match_data[key])
-
-            return replacement
-
-        else:
-            return new_self
-
-    def full_identity(self, other: Expression) -> bool:
-        return self.head == other.head and self.a.full_identity(other.a)
-
-class Binary(Expression):
-    """ Base class for binary expression components"""
-    def __init__(self, a: Any, b: Any):
-        self.a = Expression._sanitise(a)
-        self.b = Expression._sanitise(b)
-
-    def __repr__(self):
-        return f"{self.__class__.__name__}({self.a}, {self.b})"
-
-    @property
-    def terms(self) -> List[Expression]:
-        return [self.a, self.b]
-
-    def wildcard_substitute(self, wildcard_id: int, expression: Expression):
-        return self.__class__(
-            self.a.wildcard_substitute(wildcard_id, expression),
-            self.b.wildcard_substitute(wildcard_id, expression))
-
-    def _pretty_print_lines(self, indent_str) -> List[str]:
-        a_lines = self.a._pretty_print_lines(indent_str)
-        a_lines = [indent_str + line for line in a_lines]
-        a_lines[-1] += ","
-        b_lines = self.b._pretty_print_lines(indent_str)
-        b_lines = [indent_str + line for line in b_lines]
-        b_lines[-1] += ")"
-
-        return [f"{self.__class__.__name__}("] + a_lines + b_lines
-
-    def _substitute(self, source_pattern: Expression, target_pattern: Expression) -> Expression:
-
-        new_a = self.a._substitute(source_pattern, target_pattern)
-        new_b = self.b._substitute(source_pattern, target_pattern)
-
-        new_self = self.__class__(new_a, new_b)
-
-        match_data = source_pattern.match(new_self)
-
-        if match_data is not None:
-            replacement = target_pattern
-            for key in match_data:
-                replacement = replacement.wildcard_substitute(key, match_data[key])
-
-            return replacement
-
-        else:
-            return new_self
-
-
-    def full_identity(self, other: Expression) -> bool:
-        return self.head == other.head and self.a.full_identity(other.a) and self.b.full_identity(other.b)
-
-#
 # Special Expressions
 #
 
@@ -437,6 +359,9 @@ class Constant(Expression):
 
     def full_identity(self, other: Expression) -> bool:
         return other.head == self.head and self.value == other.value
+
+    def _reduce_constants(self):
+        return self.value
 
 
 class Variable(Expression):
@@ -496,6 +421,8 @@ class Variable(Expression):
     def full_identity(self, other: Expression) -> bool:
         return self.head == other.head and self.identity == other.identity
 
+    def _reduce_constants(self):
+        return self
 
 
 class Wildcard(Expression):
@@ -538,6 +465,144 @@ class Wildcard(Expression):
     def full_identity(self, other: Expression) -> bool:
         return self.head == other.head and self.number == other.number
 
+    def _reduce_constants(self):
+        return self
+
+
+#
+# Helper classes
+#
+
+
+class Unary(Expression):
+    """ Base class for unary expression components"""
+    def __init__(self, a: Any):
+        self.a = Expression._sanitise(a)
+
+    def __repr__(self):
+        return f"{self.__class__.__name__}({self.a})"
+
+    @property
+    def terms(self) -> List[Expression]:
+        return [self.a]
+
+    def wildcard_substitute(self, wildcard_id: int, expression: Expression):
+        return self.__class__(self.a.wildcard_substitute(wildcard_id, expression))
+
+    def _pretty_print_lines(self, indent_str) -> List[str]:
+        a_lines = self.a._pretty_print_lines(indent_str)
+        a_lines = [indent_str + line for line in a_lines]
+        a_lines[-1] += ")"
+        return [f"{self.__class__.__name__}("] + a_lines
+
+
+    def _substitute(self, source_pattern: Expression, target_pattern: Expression) -> Expression:
+
+        new_a = self.a._substitute(source_pattern, target_pattern)
+
+        new_self = self.__class__(new_a)
+
+        match_data = source_pattern.match(new_self)
+
+        if match_data is not None:
+            replacement = target_pattern
+            for key in match_data:
+                replacement = replacement.wildcard_substitute(key, match_data[key])
+
+            return replacement
+
+        else:
+            return new_self
+
+    def full_identity(self, other: Expression) -> bool:
+        return self.head == other.head and self.a.full_identity(other.a)
+
+    def apply(self, a):
+        raise NotImplementedError(f"apply not implemented in {self.__class__.__name__}")
+
+    def __call__(self, x):
+        return self.apply(self.a(x))
+
+    def _reduce_constants(self):
+        return self.apply(self.a._reduce_constants())
+
+class NonDunderUnary(Unary):
+    """ This is for Expressions based on functions from numpy etc, where the
+    the call it makes isn't via python operations and a dunder"""
+    def _reduce_constants(self):
+        child = self.a._reduce_constants()
+        if isinstance(child, Expression):
+            return self.expr_apply(child)
+        else:
+            return self.apply(child)
+
+    @staticmethod
+    def expr_apply(a: Expression):
+        raise NotImplementedError(f"expr_apply is not implemented in {__class__.__name__}")
+
+class Binary(Expression):
+    """ Base class for binary expression components"""
+    def __init__(self, a: Any, b: Any):
+        self.a = Expression._sanitise(a)
+        self.b = Expression._sanitise(b)
+
+    def __repr__(self):
+        return f"{self.__class__.__name__}({self.a}, {self.b})"
+
+    @property
+    def terms(self) -> List[Expression]:
+        return [self.a, self.b]
+
+    def wildcard_substitute(self, wildcard_id: int, expression: Expression):
+        return self.__class__(
+            self.a.wildcard_substitute(wildcard_id, expression),
+            self.b.wildcard_substitute(wildcard_id, expression))
+
+    def _pretty_print_lines(self, indent_str) -> List[str]:
+        a_lines = self.a._pretty_print_lines(indent_str)
+        a_lines = [indent_str + line for line in a_lines]
+        a_lines[-1] += ","
+        b_lines = self.b._pretty_print_lines(indent_str)
+        b_lines = [indent_str + line for line in b_lines]
+        b_lines[-1] += ")"
+
+        return [f"{self.__class__.__name__}("] + a_lines + b_lines
+
+    def _substitute(self, source_pattern: Expression, target_pattern: Expression) -> Expression:
+
+        new_a = self.a._substitute(source_pattern, target_pattern)
+        new_b = self.b._substitute(source_pattern, target_pattern)
+
+        new_self = self.__class__(new_a, new_b)
+
+        match_data = source_pattern.match(new_self)
+
+        if match_data is not None:
+            replacement = target_pattern
+            for key in match_data:
+                replacement = replacement.wildcard_substitute(key, match_data[key])
+
+            return replacement
+
+        else:
+            return new_self
+
+
+    def full_identity(self, other: Expression) -> bool:
+        return self.head == other.head and self.a.full_identity(other.a) and self.b.full_identity(other.b)
+
+    @staticmethod
+    def apply(a, b):
+        raise NotImplementedError(f"apply not implemented in {__class__.__name__}")
+
+    def __call__(self, x):
+        return self.apply(self.a(x), self.b(x))
+
+    def _reduce_constants(self):
+        return self.apply(self.a._reduce_constants(), self.b._reduce_constants())
+
+
+
 #
 # Standard algabraic operations
 #
@@ -555,6 +620,9 @@ class Plus(Binary):
     def short_string(self):
         return f"({self.a.short_string()} + {self.b.short_string()})"
 
+    @staticmethod
+    def apply(a, b):
+        return a + b
 
 class Minus(Binary):
     def __init__(self, a: Expression, b: Expression):
@@ -563,11 +631,12 @@ class Minus(Binary):
     def _diff(self, term: Variable):
         return Minus(self.a._diff(term), self.b._diff(term))
 
-    def __call__(self, x):
-        return self.a(x) - self.b(x)
-
     def short_string(self):
         return f"({self.a.short_string()} - {self.b.short_string()})"
+
+    @staticmethod
+    def apply(a, b):
+        return a - b
 
 
 class Neg(Unary):
@@ -577,11 +646,12 @@ class Neg(Unary):
     def _diff(self, term: Variable):
         return Neg(self.a._diff(term))
 
-    def __call__(self, x):
-        return -self.a(x)
-
     def short_string(self):
         return f"-{self.a.short_string()}"
+
+    @staticmethod
+    def apply(a):
+        return -a
 
 
 class Times(Binary):
@@ -597,8 +667,10 @@ class Times(Binary):
                 self.a._diff(term),
                 self.b))
 
-    def __call__(self, x):
-        return self.a(x) * self.b(x)
+
+    @staticmethod
+    def apply(a, b):
+        return a * b
 
 
     def short_string(self):
@@ -619,11 +691,13 @@ class Divide(Binary):
                     self.b._diff(term))),
             Power(self.b, Constant(2)))
 
-    def __call__(self, x):
-        return self.a(x) / self.b(x)
-
     def short_string(self):
         return f"({self.a.short_string()} / {self.b.short_string()})"
+
+    @staticmethod
+    def apply(a, b):
+        return a / b
+
 
 class Modulo(Binary):
     def __init__(self, a: Expression, b: Expression):
@@ -632,11 +706,13 @@ class Modulo(Binary):
     def _diff(self, term: Variable):
         return self.a._diff(term)
 
-    def __call__(self, x):
-        return self.a(x) % self.b(x)
-
     def short_string(self):
         return f"({self.a.short_string()} % {self.b.short_string()})"
+
+    @staticmethod
+    def apply(a, b):
+        return a % b
+
 
 class Power(Binary):
     def __init__(self, a: Expression, b: Expression):
@@ -667,37 +743,51 @@ class Power(Binary):
                 )
             )
 
-    def __call__(self, x):
-        return self.a(x) ** self.b(x)
-
     def short_string(self):
         return f"({self.a.short_string()} ^ {self.b.short_string()})"
 
-class Exp(Unary):
+    @staticmethod
+    def apply(a, b):
+        return a ** b
+
+class Exp(NonDunderUnary):
     def __init__(self, a: Expression):
         super().__init__(a)
 
     def _diff(self, term: Variable):
         return Times(Exp(self.a), self.a._diff(term))
 
-    def __call__(self, x):
-        return np.exp(self.a(x))
-
     def short_string(self):
         return f"exp({self.a.short_string()})"
 
-class Log(Unary):
+    @staticmethod
+    def apply(a):
+        return np.exp(a)
+
+    @staticmethod
+    def expr_apply(a: Expression):
+        return a.exp
+
+
+class Log(NonDunderUnary):
     def __init__(self, a: Expression):
         super().__init__(a)
 
     def _diff(self, term: Variable):
         return Divide(self.a._diff(term), self.a)
 
-    def __call__(self, x):
-        return np.log(self.a(x))
-
     def short_string(self):
         return f"log({self.a.short_string()})"
+
+    @staticmethod
+    def apply(a):
+        return np.log(a)
+
+    @staticmethod
+    def expr_apply(a: Expression):
+        return a.log
+
+
 #
 # Some less nice operations that should none-the-less be supported
 #
@@ -709,42 +799,31 @@ class Abs(Unary):
     def _diff(self, term: Variable):
         return Times(Sign(self.a), self.a._diff(term))
 
-    def __call__(self, x):
-        return np.log(self.a(x))
-
     def short_string(self):
         return f"abs({self.a.short_string()})"
 
-class Sign(Unary):
+    @staticmethod
+    def apply(a):
+        return abs(a)
+
+class Sign(NonDunderUnary):
     def __init__(self, a: Expression):
         super().__init__(a)
-
-    def _diff(self, term: Variable):
-        return Times(Delta(self.a), self.a._diff(term))
-
-    def __call__(self, x):
-        return np.sign(self.a(x))
 
     def short_string(self):
         return f"sign({self.a.short_string()})"
 
+    @staticmethod
+    def apply(a):
+        return np.sign(a)
 
-class Delta(Unary):
-    def __init__(self, a: Expression):
-        super().__init__(a)
-
-    def _diff(self, term: Variable):
-        return Times(Delta(self.a), self.a._diff(term))
-
-    def __call__(self, x):
-        return np.sign(self.a(x))
+    @staticmethod
+    def expr_apply(a: Expression):
+        return a.sign
 
     @property
     def differentiable(self):
         return False
-
-    def short_string(self):
-        return f"delta({self.a.short_string()})"
 
 # Simplification rules:
 # The idea here is to have a set of rules,
