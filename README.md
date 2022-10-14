@@ -1,5 +1,16 @@
-# erroneous
-A python tool for tracking statistical dependencies and calculating better errors
+ 
+Erroneous: Tracking Statistical Dependencies and Calculating Better Errors
+==========================================================================
+
+Erroneous has multiple components
+* A token system for tracking statistical dependencies: Data Correlation Tokens (DCTs)
+  * A specification for tokens
+  * Parsers to create, interpret and use the tokens
+* Tools for making use of this tracking data, and providing related functionality
+  * Calculating standard errors
+  * Stochastic error calculations
+  * A basic symbolic calculator
+  * Abstract classes for projects that wish to leverage DCTs
 
 The Problem
 ===========
