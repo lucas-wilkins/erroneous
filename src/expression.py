@@ -87,7 +87,16 @@ class Expression:
         new_expression = self
         for i in range(max_iters):
 
+            # Combine constants where possible
             new_expression = new_expression.reduce_constants()
+
+            # TODO: Some regularisation step that allows for commutivity,
+            #  and ultimately for simplification of linear combinations
+            #  if we can rearrange Plus and Times so that like terms can be put together,
+            #  then like terms can then merged.
+            #  ...
+            #  For instance (x+2x) -> (1+2)x -> 3x, or something of the sort
+            #  ... this must be why Mathematica has Plus and Times with an arbritrary length
 
             # Try all the simplifyiing substitutions once again
             for source, target in simplification_substitutions:
@@ -169,9 +178,11 @@ class Expression:
     # Calculus
 
     def diff(self, term: Variable) -> Expression:
+        """ Differentiate this expression"""
         return self.fast_diff(term).simplify()
 
     def fast_diff(self, term: Variable) -> Expression:
+        """ Differentiate without any simplification of the result"""
         if self.differentiable:
             return self._diff(term)
         else:
