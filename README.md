@@ -4,6 +4,9 @@ A python tool for tracking statistical dependencies and calculating better error
 The Problem
 ===========
 
+Example
+-------
+
 The problem *erroneous* solves is best illustrated by a problem that occurs with 
 the standard approach to propagating errors, which is to calculate a new variance
 whenever you perform a calculation.
@@ -51,8 +54,7 @@ Data Integrity
 
 
 
+Guiding Principles
+==================
 
-
-
-What it can't be:
- * Something that can do all maths. Nothing can do that.
+* It should not try to do too much. Nothing can do all maths. It cannot represent all maths.
