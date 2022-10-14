@@ -32,11 +32,14 @@ unary_functions = {
 }
 
 # infix operators in order of precedence
-infix_operators = [
+infix_operators_pre_unary_minus = [
     ("^", expr.Power),
     ("/", expr.Divide),
     ("%", expr.Modulo),
-    ("*", expr.Times),
+    ("*", expr.Times)
+]
+
+infix_operators_post_unary_minus = [
     ("-", expr.Minus),
     ("+", expr.Plus)
 ]
@@ -119,10 +122,10 @@ def _parse_tokens(tokens: List[Union[Tuple[str, str], Expression, Tuple[Expressi
     if len(tokens) == 0:
         raise SyntaxError("Empty expression")
 
-    for iter in range(2):
+    while True:
 
         # Useful debugging statement
-        print([t[0] if isinstance(t, tuple) else t for t in tokens])
+        # print([t[0] if isinstance(t, tuple) else t for t in tokens])
 
         # step one: find first innermost parentheses
 
@@ -175,9 +178,8 @@ def _parse_tokens(tokens: List[Union[Tuple[str, str], Expression, Tuple[Expressi
 
         else:
             # The pattern should be: (neg*) symbol infix (neg*) symbol infix (neg*) symbol ...
-            # First thing to do has to be to allocate each type
+            # First thing to do has to be to convert symbols to expression objects
 
-            # Convert symbols to expression objects
             new_tokens = []
             for token in tokens:
                 if isinstance(token, tuple):
@@ -196,14 +198,45 @@ def _parse_tokens(tokens: List[Union[Tuple[str, str], Expression, Tuple[Expressi
                     new_tokens.append(token)
 
                 else:
-                    raise RuntimeError("Token string contains element that is not an Expression or tuple")
+                    raise RuntimeError(f"Token string contains element that is not an Expression or tuple: {token}")
+
+            tokens = new_tokens
+
+            # Next we apply all the of the operators that have a higher precedence than -
+
+            for op_string, op_cls in infix_operators_pre_unary_minus:
+
+                while True:
+
+                    for token_index, token in enumerate(tokens):
+                        if token == op_string:
+                            break
+                    else:
+                        break
+
+                    left = tokens[:token_index - 1]
+                    a = tokens[token_index - 1]
+                    b = tokens[token_index + 1]
+                    right = tokens[token_index + 2:]
+
+                    if not isinstance(a, Expression):
+                        raise SyntaxError(f"Cannot apply {op_string} to {a}")
+
+                    if not isinstance(b, Expression):
+                        raise SyntaxError(f"Cannot apply {op_string} to {b}")
+
+                    tokens = left + [op_cls(a, b)] + right
+
+                    # print("Reduced:", tokens)
+
+            # Now to deal with the prefix operators
 
             # group tokens into parts ending in an symbol,
             # which should now be represented as an expression
 
             sections = []
             this_section = []
-            for token in new_tokens:
+            for token in tokens:
                 this_section.append(token)
                 if isinstance(token, Expression):
                     sections.append(this_section)
@@ -244,7 +277,7 @@ def _parse_tokens(tokens: List[Union[Tuple[str, str], Expression, Tuple[Expressi
 
             # tokens should now be of the form: symbol op symbol op ... op symbol
             # go through each type of operator and apply it until there is none left
-            for op_string, op_cls in infix_operators:
+            for op_string, op_cls in infix_operators_post_unary_minus:
 
                 while True:
 
@@ -262,11 +295,15 @@ def _parse_tokens(tokens: List[Union[Tuple[str, str], Expression, Tuple[Expressi
                     tokens = left + [op_cls(a, b)] + right
 
 
+                    # print("Reduced:", tokens)
+
+        # print("Before break test", tokens)
         if len(tokens) == 1:
             break
 
 
     return tokens[0]
+
 
 def tokeniser_proto_test():
     # TODO: Make these into proper tests
@@ -278,15 +315,21 @@ def tokeniser_proto_test():
     print(_tokenise(some_algebra))
 
 
-def main():
-    # some_algebra = "-a + --(b-#1)^(a^2)"
-    # print(some_algebra)
-    # parse_expression(some_algebra).short_print()
+def parser_proto_test():
+
+    some_algebra = "-a + --(b-#1)^(a^2)"
+    print(some_algebra)
+    parse_expression(some_algebra).short_print()
 
     more_algebra = "sqrt(----a^2 + b^2)"
     print(more_algebra)
+    parse_expression(more_algebra).short_print()
     parse_expression(more_algebra).simplify().short_print()
 
+
+def main():
+    # tokeniser_proto_test()
+    parser_proto_test()
 
 if __name__ == "__main__":
     main()
