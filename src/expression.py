@@ -7,6 +7,10 @@ from collections import defaultdict
 
 import numpy as np
 
+import logging
+
+logger = logging.getLogger("expressions")
+
 
 class NonDifferentiableExpressionError(Exception):
     def __init__(self, msg):
@@ -67,17 +71,32 @@ class Expression:
         if len(bad_wildcards) > 0:
             raise SubstitutionError(f"Target expression contains wildcards not in source expression ({bad_wildcards})")
 
-        print(f"Attempting substution in {self.short_string()}:", end="")
-        print(f"  {source_pattern.short_string()} -> {target_pattern.short_string()}")
+        # print(f"Attempting substution in {self.short_string()}:", end="")
+        # print(f"  {source_pattern.short_string()} -> {target_pattern.short_string()}")
 
         return self._substitute(source_pattern, target_pattern)
 
     def _substitute(self, source_pattern: Expression, target_pattern: Expression) -> Expression:
         raise NotImplementedError(f"{self.__class__.__name__} does not implement _substitute")
 
-    def simplify(self) -> Expression:
-        # TODO: Write the simplification procedure
-        return self
+    def simplify(self, max_iters=100) -> Expression:
+        last_expression = self
+        new_expression = self
+        for i in range(max_iters):
+
+            for source, target in simplification_substitutions:
+                new_expression = new_expression.substitute(source, target)
+
+            if new_expression.full_identity(last_expression):
+                last_expression = new_expression
+                break
+
+            last_expression = new_expression
+
+        else:
+            logger.warning(f"Reached max_iters (={max_iters}) in simplification.")
+
+        return last_expression
 
     def match(self, expression: Expression) -> Optional[Dict[int, Expression]]:
         # Check that `expression` does not contain wildcards
@@ -221,15 +240,18 @@ class Expression:
         other = Expression._sanitise(other, "**")
         return Power(other, self)
 
+    @property
     def exp(self):
         return Exp(self)
 
+    @property
     def log(self):
         return Log(self)
 
     def __abs__(self):
         return Abs(self)
 
+    @property
     def sign(self):
         return Sign(self)
 
@@ -237,7 +259,7 @@ class Expression:
     # Comparisons
     #
 
-    def full_identity(self, other):
+    def full_identity(self, other: Expression) -> bool:
         raise NotImplementedError(f"{self.__class__.__name__} does not implement full_identity")
 
     #
@@ -273,6 +295,7 @@ class Unary(Expression):
     def __repr__(self):
         return f"{self.__class__.__name__}({self.a})"
 
+    @property
     def terms(self) -> List[Expression]:
         return [self.a]
 
@@ -304,6 +327,8 @@ class Unary(Expression):
         else:
             return new_self
 
+    def full_identity(self, other: Expression) -> bool:
+        return self.head == other.head and self.a.full_identity(other.a)
 
 class Binary(Expression):
     """ Base class for binary expression components"""
@@ -352,6 +377,9 @@ class Binary(Expression):
         else:
             return new_self
 
+
+    def full_identity(self, other: Expression) -> bool:
+        return self.head == other.head and self.a.full_identity(other.a) and self.b.full_identity(other.b)
 
 #
 # Special Expressions
@@ -406,6 +434,9 @@ class Constant(Expression):
 
         else:
             return self
+
+    def full_identity(self, other: Expression) -> bool:
+        return other.head == self.head and self.value == other.value
 
 
 class Variable(Expression):
@@ -462,6 +493,9 @@ class Variable(Expression):
         else:
             return self
 
+    def full_identity(self, other: Expression) -> bool:
+        return self.head == other.head and self.identity == other.identity
+
 
 
 class Wildcard(Expression):
@@ -500,6 +534,9 @@ class Wildcard(Expression):
 
     def _substitute(self, source_pattern: Expression, target_pattern: Expression) -> Expression:
         raise SubstitutionError("Attempted to substitute into expression with a wildcard")
+
+    def full_identity(self, other: Expression) -> bool:
+        return self.head == other.head and self.number == other.number
 
 #
 # Standard algabraic operations
@@ -709,3 +746,56 @@ class Delta(Unary):
     def short_string(self):
         return f"delta({self.a.short_string()})"
 
+# Simplification rules:
+# The idea here is to have a set of rules,
+#  each one of which makes the expression simpler
+#  these will be applied over and over again until
+#  they make no difference.
+#
+# it is a local simplifier
+#
+# This is not the best simplification, and there are some obvious
+# things it cannot do such as merge constants other than zero or one,
+# it can't really take advantage of associativity either
+#
+# This set of rules cannot have an circularities, otherwise bad things
+#  will happen
+
+w1 = Wildcard(0)
+w2 = Wildcard(1)
+w3 = Wildcard(2)
+
+simplification_substitutions = [
+    (w1 + 0,            w1), # Additive identity -> remove constant
+    (0 + w1,            w1),
+    (1 * w1,            w1), # Multiplicative identity -> remove constant
+    (w1 * 1,            w1),
+    (w1 - 0,            w1), # Subtractive identity -> remove constant
+    (w1 / 1,            w1), # Division identity -> remove constant
+    (w1 ** 1,           w1), # Exponential identity -> remove constant
+    (0 * w1,            Constant(0)),  # Multiplication by zero -> remove zero constant and anything it multiplies
+    (w1 * 0,            Constant(0)),
+    (1 ** w1,           Constant(1)),  # Power rules, 1^x = 1
+    # (0 ** w1,           Constant(0)),  # 0^x = 0 (not quite true)
+    (w1 ** 0,           Constant(1)),  # x^0 = 1
+    (w1 - (-w2),        w1+w2),        # Remove double minus -> remove minus signs
+    (-(-(w1)),          w1),
+    (w1 + (-w2),        w1 - w2),      # +- simplify -> reduce +- sign total
+    ((-w1) + w2,        w2 - w1),
+    (Constant(1).log,   Constant(0)),  # Log 1 = 0 -> reduce number of logs
+    (Constant(0).exp,   Constant(1)),  # Exp 0 = 1 -> reduce exp number
+    # (w1*w2 + w1*w3,     w1*(w2 + w3)),  # Distributivity of multiplication over addition
+    # (w2*w1 + w1*w3,     w1*(w2 + w3)),
+    # (w2*w1 + w3*w1,     w1*(w2 + w3)),
+    # (w1*w2 + w3*w1,     w1*(w2 + w3)),
+    # (w2/w1 + w3/w1,     (w2+w3) / w1),  # Distributivity of division over addition
+    # (w1*w2 - w1*w3,     w1*(w2 - w3)),  # Distributivity of multiplication over subtraction
+    # (w2*w1 - w1*w3,     w1*(w2 - w3)),
+    # (w2*w1 - w3*w1,     w1*(w2 - w3)),
+    # (w1*w2 - w3*w1,     w1*(w2 - w3)),
+    # (w2/w1 - w3/w1,     (w2-w3) / w1),  # Distributivity of division over subtraction
+    (w1**w2 * w1**w3,   w1**(w2+w3)),   # Exponent rules -> reduce number of exps
+    (w1.exp * w2.exp,   (w1+w2).exp),
+    (w1.log + w2.log,   (w1*w2).log),   # Log xply rule, reduce number of logs
+
+]
