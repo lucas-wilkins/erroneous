@@ -15,6 +15,7 @@ base 64 format.
    * - N Datasets (2 bytes)
    * - Dataset Hashes (variable)
    * - Process Description (variable)
+   * - Variance and higher order moment data (variable)
 
 
 Base Datasets and Hashes
@@ -136,4 +137,40 @@ The following is a table of the binary operations and their IDs
    * - Power
      - 0x45
 
-... more to be added
+Variance and higher moments
+---------------------------
+
+.. list-table::
+
+   * - Number of numerical moments (1 byte)
+     - Length of each moment dataset (4 bytes)
+     - Encoding type (1 byte)
+     - Moment data (`n_moments` x `length` x `numeric type size`)
+     - Moment descriptor (variable)
+
+The moment descriptor is a fairly open ended description of the data's distribution,
+it can contain one or more of these fields (although 0x00 excludes all others)
+
+.. list-table::
+
+   * - 0x00
+     - Only numeric, higher order moments should be zero
+   * - 0x01
+     - Moment generating function, defined below
+   * - 0x02
+     - Explicit distribution name (e.g. normal, poisson, binomial etc)
+   * - 0x03
+     - Defined by data type (e.g. counts)
+
+The moment generating function field is specified as an expression given in terms of the observed moments,
+each encoded using the symbolic scheme
+
+Encoding types
+==============
+
+The different types of encoding are specified by IEEE standards (TODO). DCTs support the following data types (TODO)
+
+
+
+Data Dimensionality
+-------------------

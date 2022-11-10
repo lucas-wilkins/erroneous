@@ -28,6 +28,8 @@ unary_functions = {
     "log": expr.Log,
     "abs": expr.Abs,
     "sign": expr.Sign,
+    "cos": expr.Cos,
+    "sin": expr.Sin,
     "sqrt": lambda x: expr.Power(x, expr.Constant(0.5))
 }
 
@@ -329,7 +331,9 @@ def parser_proto_test():
 
 def main():
     # tokeniser_proto_test()
-    parser_proto_test()
+    # parser_proto_test()
+    from expression import Variable
+    parse_expression("sin(x)").diff(Variable('x'), True).pretty_print()
 
 if __name__ == "__main__":
     main()

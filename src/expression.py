@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Dict, Any, Optional, Callable, List, Set
+from typing import Dict, Any, Optional, Callable, List, Set, Tuple
 
 from fractions import Fraction
 from collections import defaultdict
@@ -81,7 +81,7 @@ class Expression:
     def reduce_constants(self) -> Expression:
         raise NotImplementedError(f"{self.__class__.__name__} does not implement reduce_constants")
 
-    def simplify(self, max_iters=100) -> Expression:
+    def simplify(self, max_iters=100, debug=False) -> Expression:
         last_expression = self
         new_expression = self
         for i in range(max_iters):
@@ -97,9 +97,15 @@ class Expression:
             #  For instance (x+2x) -> (1+2)x -> 3x, or something of the sort
             #  ... this must be why Mathematica has Plus and Times with an arbritrary length
 
-            # Try all the simplifyiing substitutions once again
+            # Try all the simplifying substitutions once again
             for source, target in simplification_substitutions:
-                new_expression = new_expression.substitute(source, target)
+                if debug:
+                    newer_expression = new_expression.substitute(source, target)
+                    if newer_expression != new_expression:
+                        print("Simplifed to:", newer_expression.short_string())
+                        print("Rule:", source, "->", target)
+                else:
+                    new_expression = new_expression.substitute(source, target)
 
             if new_expression.full_identity(last_expression):
                 last_expression = new_expression
@@ -176,9 +182,9 @@ class Expression:
 
     # Calculus
 
-    def diff(self, term: Variable) -> Expression:
+    def diff(self, term: Variable, debug: bool=False) -> Expression:
         """ Differentiate this expression"""
-        return self.fast_diff(term).simplify()
+        return self.fast_diff(term).simplify(debug=debug)
 
     def fast_diff(self, term: Variable) -> Expression:
         """ Differentiate without any simplification of the result"""
@@ -538,6 +544,8 @@ class Unary(Expression):
     def _reduce_constants(self):
         return self.apply(self.a._reduce_constants())
 
+
+
 class NonDunderUnary(Unary):
     """ This is for Expressions based on functions from numpy etc, where the
     the call it makes isn't via python operations and a dunder"""
@@ -549,8 +557,9 @@ class NonDunderUnary(Unary):
             return self.apply(child)
 
     @staticmethod
-    def expr_apply(a: Expression):
+    def expr_apply(a: Expression) -> Callable:
         raise NotImplementedError(f"expr_apply is not implemented in {__class__.__name__}")
+
 
 class Binary(Expression):
     """ Base class for binary expression components"""
@@ -599,7 +608,6 @@ class Binary(Expression):
         else:
             return new_self
 
-
     def full_identity(self, other: Expression) -> bool:
         return self.head == other.head and self.a.full_identity(other.a) and self.b.full_identity(other.b)
 
@@ -635,6 +643,7 @@ class Plus(Binary):
     @staticmethod
     def apply(a, b):
         return a + b
+
 
 class Minus(Binary):
     def __init__(self, a: Expression, b: Expression):
@@ -684,9 +693,9 @@ class Times(Binary):
     def apply(a, b):
         return a * b
 
-
     def short_string(self):
         return f"({self.a.short_string()} * {self.b.short_string()})"
+
 
 class Divide(Binary):
     def __init__(self, a: Expression, b: Expression):
@@ -837,6 +846,50 @@ class Sign(NonDunderUnary):
     def differentiable(self):
         return False
 
+#
+# Tig functions
+#
+
+
+class Cos(NonDunderUnary):
+    def __init__(self, a: Expression):
+        super().__init__(a)
+
+    def short_string(self):
+        return f"cos({self.a.short_string()})"
+
+    @staticmethod
+    def apply(a):
+        return np.cos(a)
+
+    @staticmethod
+    def expr_apply(a: Expression):
+        return lambda x: Cos(x)
+
+    def _diff(self, term: Variable) -> Expression:
+        return -self.a.diff(term) * Sin(self.a)
+
+
+class Sin(NonDunderUnary):
+    def __init__(self, a: Expression):
+        super().__init__(a)
+
+    def short_string(self):
+        return f"sin({self.a.short_string()})"
+
+    @staticmethod
+    def apply(a):
+        return np.sin(a)
+
+    @staticmethod
+    def expr_apply(a: Expression):
+        return lambda x: Sin(x)
+
+
+    def _diff(self, term: Variable) -> Expression:
+        return self.a.diff(term) * Cos(self.a)
+
+
 # Simplification rules:
 # The idea here is to have a set of rules,
 #  each one of which makes the expression simpler
@@ -856,7 +909,7 @@ w1 = Wildcard(0)
 w2 = Wildcard(1)
 w3 = Wildcard(2)
 
-simplification_substitutions = [
+simplification_substitutions: Tuple[Expression, Expression] = [
     (w1 + 0,            w1), # Additive identity -> remove constant
     (0 + w1,            w1),
     (1 * w1,            w1), # Multiplicative identity -> remove constant

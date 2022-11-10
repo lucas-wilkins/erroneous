@@ -54,6 +54,19 @@ $x$ was dependent on $b$.
 A Solution
 ==========
 
+You only need to save a token
+
+Example, with the two $a$ and $b$ variables from before, lets make two derived datasets:
+
+$p = a - b$ which will have a variance of $\sigma_a^2 + \sigma_b^2$
+$q = b - a$ which will have a variance of $\sigma_a^2 + \sigma_b^2$
+
+Now we can save these datasets, throwing away the original data, but saving the DCT with them,
+then if we load them we can calculate difference, which should be zero
+
+$d = p - q$ and find that $\sigma_d = 0$
+
+WOHOOO!
 
 A Standard
 ==========
