@@ -11,7 +11,15 @@ import logging
 
 logger = logging.getLogger("expressions")
 
+endianness = 'big'
+
 class NonDifferentiableExpressionError(Exception):
+    """ Differentiation not defined """
+    def __init__(self, msg):
+        super.__init__(msg)
+
+class NoEncodingEntry(Exception):
+    """ No encoding exists for class """
     def __init__(self, msg):
         super.__init__(msg)
 
@@ -318,6 +326,29 @@ class Expression:
     def short_print(self, file=None):
         print(self.short_string(), file=file)
 
+    #
+    # Serialisation
+    #
+
+    def variables(self) -> Set[Variable]:
+        out = set()
+        for term in self.terms:
+            if isinstance(term, Variable):
+                out.add(term)
+            else:
+                out.update(term.variables())
+        return out
+
+    def serialise(self):
+        variable_lookup = list(self.variables)
+        
+
+    def _serialise(self) -> bytes:
+        if self.__class__ in encoding:
+            return encoding[self.__class__].to_bytes(1, endianness) + self._serialisation_details()
+
+    def _serialisation_details(self) -> bytes:
+        raise NoEncodingEntry(f"No encoding found for class {self.__class__}")
 
 #TODO: Add support for peicewise combinations
 
@@ -380,6 +411,11 @@ class Constant(Expression):
 
     def _reduce_constants(self):
         return self.value
+
+    #
+    # Serialisation
+    #
+
 
 
 class Variable(Expression):
@@ -909,7 +945,7 @@ w1 = Wildcard(0)
 w2 = Wildcard(1)
 w3 = Wildcard(2)
 
-simplification_substitutions: Tuple[Expression, Expression] = [
+simplification_substitutions: List[Tuple[Expression, Expression]] = [
     (w1 + 0,            w1), # Additive identity -> remove constant
     (0 + w1,            w1),
     (1 * w1,            w1), # Multiplicative identity -> remove constant
@@ -941,5 +977,25 @@ simplification_substitutions: Tuple[Expression, Expression] = [
     (w1**w2 * w1**w3,   w1**(w2+w3)),   # Exponent rules -> reduce number of exps
     (w1.exp * w2.exp,   (w1+w2).exp),
     (w1.log + w2.log,   (w1*w2).log),   # Log xply rule, reduce number of logs
-
 ]
+
+encoding = {
+    Constant: 1,
+    Variable: 2,
+    Plus: 3,
+    Minus: 4,
+    Neg: 5,
+    Times: 6,
+    Divide: 7,
+    Modulo: 8,
+    Power: 9,
+    Exp: 10,
+    Log: 11,
+    Cos: 12,
+    Sin: 13,
+    Abs: 14,
+    Sign: 15,
+}
+
+decoding = {encoding[key] for key in encoding}
+
