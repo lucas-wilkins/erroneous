@@ -4,6 +4,7 @@ from typing import Dict, Any, Optional, Callable, List, Set, Tuple
 
 from fractions import Fraction
 from collections import defaultdict
+from encoding_settings import EncodingSettings
 
 import numpy as np
 
@@ -11,27 +12,35 @@ import logging
 
 logger = logging.getLogger("expressions")
 
-endianness = 'big'
+
+#
+# Errors
+#
+
 
 class NonDifferentiableExpressionError(Exception):
     """ Differentiation not defined """
     def __init__(self, msg):
         super.__init__(msg)
 
+
 class NoEncodingEntry(Exception):
     """ No encoding exists for class """
     def __init__(self, msg):
         super.__init__(msg)
+
 
 class EvaluationError(Exception):
     """ A problem with evaluating an expression"""
     def __init__(self, msg):
         super().__init__(msg)
 
+
 class SubstitutionError(Exception):
     """ A problem with the substitution procedure"""
     def __init__(self, msg):
         super().__init__(msg)
+
 
 class MatchFailure(Exception):
     """ Exception used to signal that a pattern does not match"""
@@ -340,14 +349,16 @@ class Expression:
         return out
 
     def serialise(self):
-        variable_lookup = list(self.variables)
-        
+        vars = sorted(list(self.variables()), key=lambda x: x.name)
+        variable_lookup = {var: ind for var, ind in enumerate(vars)}
 
-    def _serialise(self) -> bytes:
+
+    def _serialise(self, variable_lookup: Dict[Variable, int]) -> bytes:
         if self.__class__ in encoding:
-            return encoding[self.__class__].to_bytes(1, endianness) + self._serialisation_details()
+            return encoding[self.__class__].to_bytes(EncodingSettings.expression_bytes, EncodingSettings.endianness) + \
+                   self._serialisation_details(variable_lookup)
 
-    def _serialisation_details(self) -> bytes:
+    def _serialisation_details(self, variable_lookup: Dict[Variable, int]) -> bytes:
         raise NoEncodingEntry(f"No encoding found for class {self.__class__}")
 
 #TODO: Add support for peicewise combinations
