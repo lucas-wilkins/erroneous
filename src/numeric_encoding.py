@@ -19,9 +19,9 @@ class CannotEncode(Exception):
 def encode_numeric(number: EncodableNumber):
     """ Encode numeric data """
     if isinstance(number, int):
-        return encode_numeric(np.array(number, dtype=np.float32))
+        return encode_numeric(np.array(number, dtype=EncodingSettings.int_dtype))
     elif isinstance(number, float):
-        return encode_numeric(np.array(number, dtype=np.int32))
+        return encode_numeric(np.array(number, dtype=EncodingSettings.float_dtype))
     elif isinstance(number, np.ndarray):
         return _encode_numpy_array(number)
     else:
@@ -29,7 +29,7 @@ def encode_numeric(number: EncodableNumber):
 
 
 def _encode_int(x: int):
-    return x.to_bytes(EncodingSettings.number_encoding_depth, EncodingSettings.endianness)
+    return x.to_bytes(EncodingSettings.int_bytes, EncodingSettings.endianness)
 
 
 
@@ -44,10 +44,10 @@ def _encode_numpy_array(arr: np.ndarray):
     # Is it an int array or a float array
     if arr.dtype.kind == "i":
         int_float_flag = 0
-        arr = arr.astype(np.int32)
+        arr = arr.astype(EncodingSettings.int_dtype)
     elif arr.dtype.kind == "f":
         int_float_flag = 1
-        arr = arr.astype(np.float32)
+        arr = arr.astype(EncodingSettings.float_dtype)
     else:
         raise NoNumberEncoding(f"Cannot encode data of dtype {arr.dtype}")
 
@@ -68,7 +68,12 @@ def _encode_numpy_array(arr: np.ndarray):
 
     return b''.join(sections)
 
+
 def decode_numeric(data: bytes):
+    return decode_numeric_with_size(data)[0]
+
+
+def decode_numeric_with_size(data: bytes):
     """
     Decode byte data into int, float or numpy array
 
@@ -78,15 +83,17 @@ def decode_numeric(data: bytes):
 
     # Get the type and shape
     int_float_flag = data[0] & 1
-    dtype = np.int32 if int_float_flag == 0 else np.float32
+    dtype = EncodingSettings.int_dtype if int_float_flag == 0 else EncodingSettings.float_dtype
+    dsize = EncodingSettings.int_bytes if int_float_flag == 0 else EncodingSettings.float_bytes
 
     shape_length = data[0] >> 1
 
     shape = []
     for i in range(shape_length):
-        dim_data = data[1+EncodingSettings.dimension_encoding_depth*i:1+EncodingSettings.dimension_encoding_depth*(i+1)]
+        a = EncodingSettings.dimension_encoding_depth*i + 1
+        b = a + EncodingSettings.dimension_encoding_depth
+        dim_data = data[a:b]
         dim = int.from_bytes(dim_data, EncodingSettings.endianness, signed=False)
-        # print(dim_data, dim)
         shape.append(dim)
 
     n_datapoints = 1
@@ -94,43 +101,22 @@ def decode_numeric(data: bytes):
         n_datapoints *= n
 
     data_start = 1 + shape_length*EncodingSettings.dimension_encoding_depth
-    data_end = data_start + EncodingSettings.number_encoding_depth*n_datapoints
+    data_end = data_start + dsize*n_datapoints
 
     data_bytes = data[data_start:data_end]
 
+    unshaped = np.frombuffer(data_bytes, dtype=dtype)
+
     if len(shape) == 0:
+        # Return a python, not numpy object
+
         if int_float_flag == 0:
             # integer
-            return int(np.frombuffer(data_bytes, dtype=np.int32)), data_end
+            return int(unshaped), data_end
         else:
             # float
-            return float(np.frombuffer(data_bytes, dtype=np.float32)), data_end
+            return float(unshaped), data_end
 
     else:
-
-        if int_float_flag == 0:
-            # integer
-            unshaped = np.frombuffer(data_bytes, dtype=np.int32)
-        else:
-            # float
-            unshaped = np.frombuffer(data_bytes, dtype=np.float32)
-
         return unshaped.reshape(tuple(shape)), data_end
-
-
-if __name__ == "__main__":
-
-    for input in [1,
-                  1.0,
-                  np.arange(10, dtype=float),
-                  np.arange(10, dtype=int),
-                  np.zeros((3,3,3)),
-                  np.arange(12).reshape((3, 4))]:
-
-
-        encoded = encode_numeric(input)
-        decoded, decode_size = decode_numeric(encoded)
-
-        print(len(encoded), decode_size)
-        print(input, decoded)
 
