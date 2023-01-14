@@ -7,7 +7,7 @@ from encoding_settings import EncodingSettings
 
 from hypothesis.extra.numpy import arrays, array_shapes, array_dtypes
 
-from numeric_encoding import encode_numeric, decode_numeric
+from data_type_encoding import encode_numeric, decode_numeric
 
 
 class TestNumericEncoding(unittest.TestCase):

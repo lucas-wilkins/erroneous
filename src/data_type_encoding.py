@@ -120,3 +120,17 @@ def decode_numeric_with_size(data: bytes):
     else:
         return unshaped.reshape(tuple(shape)), data_end
 
+def encode_full_int(value: int) -> bytes:
+    pass
+
+def decode_full_int_with_size(data: bytes) -> int:
+    pass
+
+def decode_full_int(data: bytes) -> int:
+    pass
+
+def encode_bytestring(data: bytes):
+    pass
+
+def decode_bytestring(data: bytes):
+    pass
