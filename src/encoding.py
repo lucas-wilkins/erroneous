@@ -2,6 +2,17 @@
 
 import numpy as np
 
+
+class EncodingError(Exception):
+    def __init__(self, msg):
+        super.__init__(msg)
+
+
+class DecodingError(Exception):
+    def __init__(self, msg):
+        super.__init__(msg)
+
+
 class EncodingSettings:
     endianness = 'big'
     variable_index_bytes = 2      # 65536 possible variables
@@ -13,4 +24,5 @@ class EncodingSettings:
     float_dtype = np.float64
     bytestring_length_bytes = 4   # 32 bits - 4GB of data max
 
-    bytestring_max_length = 256**bytestring_length_bytes
+    variable_index_max = 256 ** variable_index_bytes
+    bytestring_length_max = 256 ** bytestring_length_bytes

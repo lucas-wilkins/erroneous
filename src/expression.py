@@ -4,8 +4,11 @@ from typing import Dict, Any, Optional, Callable, List, Set, Tuple, Type, Union
 
 from fractions import Fraction
 from collections import defaultdict
-from encoding_settings import EncodingSettings
-from data_type_encoding import EncodableNumber, encode_numeric, decode_numeric_with_size
+from encoding import EncodingSettings, EncodingError
+from data_type_encoding import (
+    EncodableNumber,
+    encode_numeric, decode_numeric_with_size,
+    encode_bytestring, decode_bytestring_with_size)
 
 import numpy as np
 
@@ -340,19 +343,26 @@ class Expression:
     # Serialisation
     #
 
+    def variables(self) -> List[Tuple[bytes, Optional[str]]]:
 
-    def variables(self) -> List[Tuple[bytes, str]]:
-        out = set()
+        alias_lookup = {}
         for term in self.terms:
             if isinstance(term, Variable):
-                out.add(term.identity)
+                alias_lookup[term.identity] = term.print_alias
             else:
-                out.update(term.variables())
-        return list(out)
+                alias_lookup.update(term.variables())
+
+        sorted_keys = sorted(alias_lookup.keys())
+
+        return [(key, alias_lookup[key]) for key in sorted_keys]
+
 
     def serialise(self):
-        vars = sorted(self.variables(), )
-        variable_lookup = {var: ind for var, ind in enumerate(vars)}
+        variables = self.variables()
+        variable_ids = [v[0] for v in self.variables()]
+        variable_lookup = {var: ind for ind, var in enumerate(variable_ids)}
+
+        variable_table = encode_variable_table(variables)
 
     def _serialise(self, variable_lookup: Dict[str, int]) -> bytes:
         if self.__class__ in expression_encoding:
@@ -367,7 +377,7 @@ class Expression:
         pass
 
     @staticmethod
-    def _deserialise(data: bytes, variable_lookup: Dict[int, Variable]) -> Expression:
+    def _deserialise(data: bytes, variable_lookup: Dict[int, Tuple[bytes, str]]) -> Expression:
         expr_bytes = data[:EncodingSettings.expression_bytes]
         expr_cls_id = int.from_bytes(expr_bytes, EncodingSettings.endianness, signed=False)
         expr_cls = expression_decoding[expr_cls_id]
@@ -459,13 +469,18 @@ class Variable(Expression):
         elif isinstance(identity, bytes):
             self.identity = identity
 
-        if print_alias is None:
-            self.print_alias = str(self.identity)
+        # print_alias of none and "" are treated equivalently,
+        # this should match with the serialisation method.
+
+        if print_alias is None or print_alias == "":
+            self.aliased = str(self.identity)
+            self.print_alias = None
         else:
             self.print_alias = print_alias
+            self.aliased = print_alias
 
     def __repr__(self):
-        return self.print_alias
+        return self.aliased
 
     @property
     def terms(self) -> List[Expression]:
@@ -485,7 +500,7 @@ class Variable(Expression):
         return {}
 
     def _pretty_print_lines(self, indent_str: str) -> List[str]:
-        return [self.print_alias]
+        return [self.aliased]
 
     def _diff(self, term: Variable):
         if term.identity == self.identity:
@@ -520,8 +535,8 @@ class Variable(Expression):
     # Serialisation
     #
 
-    def _serialisation_details(self, variable_lookup: Dict[Variable, int]) -> bytes:
-        return variable_lookup[self].to_bytes(
+    def _serialisation_details(self, variable_lookup: Dict[bytes, int]) -> bytes:
+        return variable_lookup[self.identity].to_bytes(
             EncodingSettings.variable_index_bytes,
             EncodingSettings.endianness,
             signed=False)
@@ -919,6 +934,7 @@ class Abs(Unary):
     def apply(a):
         return abs(a)
 
+
 class Sign(NonDunderUnary):
     def __init__(self, a: Expression):
         super().__init__(a)
@@ -1039,10 +1055,32 @@ simplification_substitutions: List[Tuple[Expression, Expression]] = [
 # Serialisation stuff
 #
 
-def encode_variable_table(variables: Dict[int, Tuple[bytes, str]]) -> bytes:
+
+def _encode_variable_table_entry(identity: bytes, alias: Optional[str]) -> bytes:
+    if alias is None:
+        alias = ""
+
+    return encode_bytestring(identity) + \
+             encode_bytestring(alias.encode('utf-8'))
+
+
+
+def encode_variable_table(variables: List[Tuple[bytes, Optional[str]]]) -> bytes:
+    n = len(variables)
+    if n > EncodingSettings.variable_index_max:
+        raise EncodingError(f"Too many variables for encoding {n}")
+
+    output_bytes = n.to_bytes(EncodingSettings.variable_index_bytes)
+    for identity, alias in variables:
+        output_bytes += _encode_variable_table_entry(identity, alias)
+
+    return output_bytes
+
+def decode_variable_table_with_size(data: bytes) -> \
+        Tuple[List[Tuple[bytes, Optional[str]]], int]:
     pass
 
-def decode_variable_table(data: bytes) -> Dict[int, Tuple[bytes, str]]:
+def decode_variable_table(data: bytes) -> List[Tuple[bytes, Optional[str]]]:
     pass
 
 
@@ -1064,5 +1102,7 @@ expression_encoding = {
     Sign: 15,
 }
 
-expression_decoding = {expression_encoding[key] for key in expression_encoding}
+expression_decoding = {
+    expression_encoding[key]: key
+    for key in expression_encoding}
 

@@ -1,23 +1,12 @@
 from typing import Union, Tuple
 import numpy as np
 
-from encoding_settings import EncodingSettings
-
+from encoding import EncodingSettings, EncodingError, DecodingError
 
 EncodableNumber = Union[int, float, np.ndarray]
 
 
 class NoNumberEncoding(Exception):
-    def __init__(self, msg):
-        super.__init__(msg)
-
-
-class EncodingError(Exception):
-    def __init__(self, msg):
-        super.__init__(msg)
-
-
-class DecodingError(Exception):
     def __init__(self, msg):
         super.__init__(msg)
 
@@ -130,8 +119,8 @@ def decode_numeric_with_size(data: bytes):
 def encode_bytestring(data: bytes) -> bytes:
     """ Encode data bytes"""
     n = len(data)
-    if n > EncodingSettings.bytestring_max_length:
-        raise EncodingError(f"Data too long to encode (length={n}, limit={EncodingSettings.bytestring_max_length})")
+    if n > EncodingSettings.bytestring_length_max:
+        raise EncodingError(f"Data too long to encode (length={n}, limit={EncodingSettings.bytestring_length_max})")
 
     return n.to_bytes(
         EncodingSettings.bytestring_length_bytes,

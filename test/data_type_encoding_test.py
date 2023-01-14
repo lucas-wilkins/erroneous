@@ -3,14 +3,32 @@ import unittest
 from hypothesis import given, strategies as st
 from typing import Union, List
 
-from encoding_settings import EncodingSettings
+from encoding import EncodingSettings, EncodingError
 
-from hypothesis.extra.numpy import arrays, array_shapes, array_dtypes
+from hypothesis.extra.numpy import arrays, array_shapes
 
-from data_type_encoding import encode_numeric, decode_numeric
+from data_type_encoding import (
+    encode_numeric, decode_numeric,
+    encode_bytestring, decode_bytestring_with_size)
 
 
-class TestNumericEncoding(unittest.TestCase):
+class TestDataTypeEncoding(unittest.TestCase):
+
+    @given(data=st.binary(), padding=st.binary())
+    def test_encode_decode_bytes(self, data: bytes, padding: bytes):
+        n = len(data)
+
+        if n > EncodingSettings.bytestring_length_max:
+            with self.assertRaises(EncodingError):
+                encode_bytestring(data)
+        else:
+            encoded = encode_bytestring(data)
+            encoded += padding
+            decoded, decoded_length = decode_bytestring_with_size(encoded)
+
+            self.assertEqual(data, decoded)
+            self.assertEqual(decoded_length, n + EncodingSettings.bytestring_length_bytes)
+
 
     @given(
         st.one_of(
