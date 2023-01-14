@@ -1,7 +1,8 @@
-from typing import Union
+from typing import Union, Tuple
 import numpy as np
 
 from encoding_settings import EncodingSettings
+
 
 EncodableNumber = Union[int, float, np.ndarray]
 
@@ -11,7 +12,12 @@ class NoNumberEncoding(Exception):
         super.__init__(msg)
 
 
-class CannotEncode(Exception):
+class EncodingError(Exception):
+    def __init__(self, msg):
+        super.__init__(msg)
+
+
+class DecodingError(Exception):
     def __init__(self, msg):
         super.__init__(msg)
 
@@ -54,7 +60,7 @@ def _encode_numpy_array(arr: np.ndarray):
     # Get length of shape
     shape_length = len(arr.shape)
     if shape_length > 127:
-        raise CannotEncode(f"To many dimensions in array ({shape_length})")
+        raise EncodingError(f"To many dimensions in array ({shape_length})")
 
     type_byte = (2*shape_length + int_float_flag).to_bytes(1, EncodingSettings.endianness, signed=False)
     shape_bytes = [x.to_bytes(
@@ -120,17 +126,40 @@ def decode_numeric_with_size(data: bytes):
     else:
         return unshaped.reshape(tuple(shape)), data_end
 
-def encode_full_int(value: int) -> bytes:
-    pass
 
-def decode_full_int_with_size(data: bytes) -> int:
-    pass
+def encode_bytestring(data: bytes) -> bytes:
+    """ Encode data bytes"""
+    n = len(data)
+    if n > EncodingSettings.bytestring_max_length:
+        raise EncodingError(f"Data too long to encode (length={n}, limit={EncodingSettings.bytestring_max_length})")
 
-def decode_full_int(data: bytes) -> int:
-    pass
+    return n.to_bytes(
+        EncodingSettings.bytestring_length_bytes,
+        EncodingSettings.endianness,
+        signed=False) + data
 
-def encode_bytestring(data: bytes):
-    pass
 
-def decode_bytestring(data: bytes):
-    pass
+def decode_bytestring_with_size(data: bytes) -> Tuple[bytes, int]:
+    """ Decode bytestring object, will stop at the length of the bytestring
+        encoded in the data, not at the end of the data string,
+        returns the byte string along with the end of encoded string"""
+
+    if len(data) < EncodingSettings.bytestring_length_bytes:
+        raise DecodingError(f"Encoded bytestring too short (smaller than length specifier length, {EncodingSettings.bytestring_length_bytes} bytes)")
+
+    data_length = int.from_bytes(
+        data[:EncodingSettings.bytestring_length_bytes],
+        EncodingSettings.endianness,
+        signed=False)
+
+    length = data_length + EncodingSettings.bytestring_length_bytes
+    out = data[EncodingSettings.bytestring_length_bytes:length]
+
+    return out, length
+
+
+def decode_bytestring(data: bytes) -> bytes:
+    """ Decode bytestring object, will stop at the length of the bytestring
+    encoded in the data, not at the end of the data string"""
+
+    return decode_bytestring_with_size(data)[0]

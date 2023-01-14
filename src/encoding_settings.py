@@ -11,3 +11,6 @@ class EncodingSettings:
     int_dtype = np.int32
     float_bytes = 8               # 64 bit floats
     float_dtype = np.float64
+    bytestring_length_bytes = 4   # 32 bits - 4GB of data max
+
+    bytestring_max_length = 256**bytestring_length_bytes
