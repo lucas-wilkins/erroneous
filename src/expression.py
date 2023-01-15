@@ -1058,17 +1058,20 @@ simplification_substitutions: List[Tuple[Expression, Expression]] = [
 
 def _encode_variable_table_entry(identity: bytes, alias: Optional[str]) -> bytes:
     if alias is None:
-        alias = ""
+        alias_bytes = encode_bytestring(b'')
+    else:
+        alias_bytes = encode_bytestring(alias.encode('utf-8'))
 
-    return encode_bytestring(identity) + encode_bytestring(alias.encode('utf-8'))
+    return encode_bytestring(identity) + alias_bytes
 
 
 def _decode_variable_table_entry_with_size(data: bytes) -> Tuple[Tuple[bytes, Optional[str]], int]:
     """ Decode an entry in the variable entry """
     identity, identity_length = decode_bytestring_with_size(data)
-    alias_bytes, alias_length = decode_bytestring_with_size(data[:identity_length])
+    alias_bytes, alias_length = decode_bytestring_with_size(data[identity_length:])
+    print(alias_length)
 
-    if alias_length == 0:
+    if alias_length == EncodingSettings.bytestring_length_bytes:
         alias = None
     else:
         try:
@@ -1085,7 +1088,11 @@ def encode_variable_table(variables: List[Tuple[bytes, Optional[str]]]) -> bytes
     if n > EncodingSettings.variable_index_max:
         raise EncodingError(f"Too many variables for encoding {n}")
 
-    output_bytes = n.to_bytes(EncodingSettings.variable_index_bytes)
+    output_bytes = n.to_bytes(
+        EncodingSettings.variable_index_bytes,
+        EncodingSettings.endianness,
+        signed=False)
+
     for identity, alias in variables:
         output_bytes += _encode_variable_table_entry(identity, alias)
 
@@ -1108,6 +1115,7 @@ def decode_variable_table_with_size(data: bytes) -> Tuple[List[Tuple[bytes, Opti
         start_index += length
 
     return table_data, start_index
+
 
 def decode_variable_table(data: bytes) -> List[Tuple[bytes, Optional[str]]]:
     """ Decode the byte representation of the variable table"""

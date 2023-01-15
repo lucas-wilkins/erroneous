@@ -14,7 +14,10 @@ from data_type_encoding import (
 
 class TestDataTypeEncoding(unittest.TestCase):
 
-    @given(data=st.binary(), padding=st.binary())
+    @given(
+        data=st.binary(),
+        padding=st.binary())
+
     def test_encode_decode_bytes(self, data: bytes, padding: bytes):
         n = len(data)
 
@@ -36,6 +39,7 @@ class TestDataTypeEncoding(unittest.TestCase):
             st.integers(
                 min_value=-(2**31 - 1),
                 max_value=2**31 - 1)))
+
     def test_encode_decode_scalar(self, data: Union[float, int, np.ndarray]):
 
         encoded = encode_numeric(data)
@@ -46,13 +50,15 @@ class TestDataTypeEncoding(unittest.TestCase):
 
 
 
-    @given(st.one_of(
+    @given(
+        st.one_of(
             arrays(
                 shape=array_shapes(max_dims=4),
                 dtype=EncodingSettings.int_dtype),
             arrays(
                 shape=array_shapes(max_dims=4),
                 dtype=EncodingSettings.float_dtype)))
+
     def test_encode_decode_numpy(self, data: np.ndarray):
 
             encoded = encode_numeric(data)
@@ -70,6 +76,7 @@ class TestDataTypeEncoding(unittest.TestCase):
                     self.assertEqual(n, m)
 
                 np.testing.assert_almost_equal(data, decoded)
+
 
 if __name__ == "__main__":
     unittest.main()
