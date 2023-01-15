@@ -4,7 +4,7 @@ from typing import Dict, Any, Optional, Callable, List, Set, Tuple, Type, Union
 
 from fractions import Fraction
 from collections import defaultdict
-from encoding import EncodingSettings, EncodingError
+from encoding import EncodingSettings, EncodingError, DecodingError
 from data_type_encoding import (
     EncodableNumber,
     encode_numeric, decode_numeric_with_size,
@@ -1060,12 +1060,27 @@ def _encode_variable_table_entry(identity: bytes, alias: Optional[str]) -> bytes
     if alias is None:
         alias = ""
 
-    return encode_bytestring(identity) + \
-             encode_bytestring(alias.encode('utf-8'))
+    return encode_bytestring(identity) + encode_bytestring(alias.encode('utf-8'))
 
 
+def _decode_variable_table_entry_with_size(data: bytes) -> Tuple[Tuple[bytes, Optional[str]], int]:
+    """ Decode an entry in the variable entry """
+    identity, identity_length = decode_bytestring_with_size(data)
+    alias_bytes, alias_length = decode_bytestring_with_size(data[:identity_length])
+
+    if alias_length == 0:
+        alias = None
+    else:
+        try:
+            alias = alias_bytes.decode('utf-8')
+        except UnicodeDecodeError as e:
+            raise DecodingError(f"{str(e)} in alias for {str(identity)}: {str(alias_bytes)})")
+
+    return (identity, alias), identity_length + alias_length
 
 def encode_variable_table(variables: List[Tuple[bytes, Optional[str]]]) -> bytes:
+    """ Encode the the variable table """
+
     n = len(variables)
     if n > EncodingSettings.variable_index_max:
         raise EncodingError(f"Too many variables for encoding {n}")
@@ -1076,12 +1091,27 @@ def encode_variable_table(variables: List[Tuple[bytes, Optional[str]]]) -> bytes
 
     return output_bytes
 
-def decode_variable_table_with_size(data: bytes) -> \
-        Tuple[List[Tuple[bytes, Optional[str]]], int]:
-    pass
+
+def decode_variable_table_with_size(data: bytes) -> Tuple[List[Tuple[bytes, Optional[str]]], int]:
+    """ Decode the byte representation of the variable table and return size"""
+
+    n_variables = int.from_bytes(
+        data[:EncodingSettings.variable_index_bytes],
+        EncodingSettings.endianness,
+        signed=False)
+
+    table_data = []
+    start_index = EncodingSettings.variable_index_bytes
+    for i in range(n_variables):
+        variable_data, length = _decode_variable_table_entry_with_size(data[start_index:])
+        table_data.append(variable_data)
+        start_index += length
+
+    return table_data, start_index
 
 def decode_variable_table(data: bytes) -> List[Tuple[bytes, Optional[str]]]:
-    pass
+    """ Decode the byte representation of the variable table"""
+    return decode_variable_table_with_size(data)[0]
 
 
 expression_encoding = {
