@@ -90,8 +90,12 @@ class TestExpressionEncoding(unittest.TestCase):
         padding=st.binary())
     def test_encode_decode_single_variable(self, identity: bytes, print_alias: Optional[str], padding: bytes):
         expr = Variable(identity, print_alias=print_alias)
-        encoded = expr._serialise({}) + padding
-        decoded, _ = Expression._deserialise_with_size(encoded, [])
+        encoded = expr.serialise()
+
+        decoded, size = Expression.deserialise_with_size(encoded + padding)
+
+        self.assertEqual(len(encoded), size)
+        self.assertEqual(expr.pretty_print_string(), decoded.pretty_print_string())
 
 
     test_expressions = [

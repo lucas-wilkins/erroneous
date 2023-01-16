@@ -381,9 +381,6 @@ class Expression:
         variable_table, variable_table_length = \
             decode_variable_table_with_size(data)
 
-
-        print(variable_table)
-
         # Create variables
         variables = [Variable(identity, print_alias)
                      for identity, print_alias in variable_table]
@@ -573,6 +570,9 @@ class Variable(Expression):
     # Serialisation
     #
 
+    def variables(self) -> List[Tuple[bytes, Optional[str]]]:
+        return [(self.identity, self.print_alias)]
+
     def _serialisation_details(self, variable_lookup: Dict[bytes, int]) -> bytes:
         return variable_lookup[self.identity].to_bytes(
             EncodingSettings.variable_index_bytes,
@@ -586,7 +586,7 @@ class Variable(Expression):
             variable_lookup: List[Variable]) -> Tuple[Expression, int]:
 
         variable_index = \
-            int.from_bytes(data,
+            int.from_bytes(data[:EncodingSettings.variable_index_bytes],
                            EncodingSettings.endianness,
                            signed=False)
 
@@ -1141,7 +1141,6 @@ def _decode_variable_table_entry_with_size(data: bytes) -> Tuple[Tuple[bytes, Op
     """ Decode an entry in the variable entry """
     identity, identity_length = decode_bytestring_with_size(data)
     alias_bytes, alias_length = decode_bytestring_with_size(data[identity_length:])
-    print(alias_length)
 
     if alias_length == EncodingSettings.bytestring_length_bytes:
         alias = None
