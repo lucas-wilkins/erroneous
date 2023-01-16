@@ -356,41 +356,70 @@ class Expression:
 
         return [(key, alias_lookup[key]) for key in sorted_keys]
 
-
     def serialise(self):
         variables = self.variables()
         variable_ids = [v[0] for v in self.variables()]
         variable_lookup = {var: ind for ind, var in enumerate(variable_ids)}
-
         variable_table = encode_variable_table(variables)
 
-    def _serialise(self, variable_lookup: Dict[str, int]) -> bytes:
+        return variable_table + self._serialise(variable_lookup)
+
+    def _serialise(self, variable_lookup: Dict[bytes, int]) -> bytes:
         if self.__class__ in expression_encoding:
             return expression_encoding[self.__class__].to_bytes(EncodingSettings.expression_bytes, EncodingSettings.endianness) + \
                    self._serialisation_details(variable_lookup)
 
-    def _serialisation_details(self, variable_lookup: Dict[str, int]) -> bytes:
+    def _serialisation_details(self, variable_lookup: Dict[bytes, int]) -> bytes:
         raise NoEncodingEntry(f"No encoding found for class {self.__class__}")
 
     @staticmethod
-    def deserialise(data):
-        pass
+    def deserialise(data: bytes) -> Expression:
+        return Expression.deserialise_with_size(data)[0]
 
     @staticmethod
-    def _deserialise(data: bytes, variable_lookup: Dict[int, Tuple[bytes, str]]) -> Expression:
+    def deserialise_with_size(data: bytes) -> Tuple[Expression, int]:
+        variable_table, variable_table_length = \
+            decode_variable_table_with_size(data)
+
+
+        print(variable_table)
+
+        # Create variables
+        variables = [Variable(identity, print_alias)
+                     for identity, print_alias in variable_table]
+
+
+        expr, expr_length = \
+            Expression._deserialise_with_size(
+                data[variable_table_length:],
+                variables)
+
+        return expr, variable_table_length + expr_length
+
+    @staticmethod
+    def _deserialise_with_size(
+            data: bytes,
+            variable_lookup: List[Variable]) -> Tuple[Expression, int]:
+
         expr_bytes = data[:EncodingSettings.expression_bytes]
         expr_cls_id = int.from_bytes(expr_bytes, EncodingSettings.endianness, signed=False)
         expr_cls = expression_decoding[expr_cls_id]
 
         rest = data[EncodingSettings.expression_bytes:]
 
-        return expr_cls._create_from_bytes(expr_cls, rest, variable_lookup)
+        expr, length = expr_cls._create_from_bytes(expr_cls, rest, variable_lookup)
+
+        return expr, EncodingSettings.expression_bytes + length
 
     @staticmethod
-    def _create_from_bytes(cls: Type[Expression], data: bytes, variable_lookup: Dict[int, Variable]):
-        pass
+    def _create_from_bytes(
+            cls: Type[Expression],
+            data: bytes,
+            variable_lookup: List[Variable]) -> Tuple[Expression, int]:
 
-#TODO: Add support for peicewise combinations
+        raise NotImplementedError(f"Cannot instance of '{cls.__name__}' - no implemenation of '_create_from_bytes'")
+
+
 
 #
 # Special Expressions
@@ -458,6 +487,15 @@ class Constant(Expression):
 
     def _serialisation_details(self, variable_lookup: Dict[Variable, int]) -> bytes:
         return encode_numeric(self.value)
+
+    @staticmethod
+    def _create_from_bytes(
+            cls: Type[Expression],
+            data: bytes,
+            variable_lookup: List[Variable]) -> Tuple[Expression, int]:
+
+        number, length = decode_numeric_with_size(data)
+        return Constant(number), length
 
 
 class Variable(Expression):
@@ -540,6 +578,19 @@ class Variable(Expression):
             EncodingSettings.variable_index_bytes,
             EncodingSettings.endianness,
             signed=False)
+
+    @staticmethod
+    def _create_from_bytes(
+            cls: Type[Expression],
+            data: bytes,
+            variable_lookup: List[Variable]) -> Tuple[Expression, int]:
+
+        variable_index = \
+            int.from_bytes(data,
+                           EncodingSettings.endianness,
+                           signed=False)
+
+        return variable_lookup[variable_index], EncodingSettings.variable_index_bytes
 
 
 class Wildcard(Expression):
@@ -647,9 +698,19 @@ class Unary(Expression):
     # Serialisation
     #
 
-    def _serialisation_details(self, variable_lookup: Dict[Variable, int]) -> bytes:
+    def _serialisation_details(self, variable_lookup: Dict[bytes, int]) -> bytes:
         return self.a._serialise(variable_lookup)
 
+
+    @staticmethod
+    def _create_from_bytes(
+            cls: Type[Unary],
+            data: bytes,
+            variable_lookup: List[Variable]) -> Tuple[Expression, int]:
+
+        a, length = Expression._deserialise_with_size(data, variable_lookup)
+
+        return cls(a), length
 
 
 class NonDunderUnary(Unary):
@@ -729,6 +790,17 @@ class Binary(Expression):
 
     def _serialisation_details(self, variable_lookup: Dict[Variable, int]) -> bytes:
         return self.a._serialise(variable_lookup) + self.b._serialise(variable_lookup)
+
+    @staticmethod
+    def _create_from_bytes(
+            cls: Type[Binary],
+            data: bytes,
+            variable_lookup: List[Variable]) -> Tuple[Expression, int]:
+
+        a, a_length = Expression._deserialise_with_size(data, variable_lookup)
+        b, b_length = Expression._deserialise_with_size(data[a_length:], variable_lookup)
+
+        return cls(a, b), a_length + b_length
 
 #
 # Standard algabraic operations

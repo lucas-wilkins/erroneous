@@ -26,3 +26,5 @@ class EncodingSettings:
 
     variable_index_max = 256 ** variable_index_bytes
     bytestring_length_max = 256 ** bytestring_length_bytes
+    max_encodable_signed_int = 256**int_bytes // 2 - 1
+    min_encodable_signed_int = -max_encodable_signed_int
