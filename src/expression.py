@@ -99,9 +99,6 @@ class Expression:
     def _substitute(self, source_pattern: Expression, target_pattern: Expression) -> Expression:
         raise NotImplementedError(f"{self.__class__.__name__} does not implement _substitute")
 
-    def reduce_constants(self) -> Expression:
-        raise NotImplementedError(f"{self.__class__.__name__} does not implement reduce_constants")
-
     def simplify(self, max_iters=100, debug=False) -> Expression:
         last_expression = self
         new_expression = self

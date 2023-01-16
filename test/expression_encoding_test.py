@@ -109,7 +109,7 @@ class TestExpressionEncoding(unittest.TestCase):
             encoded = expression.serialise()
             decoded = Expression.deserialise(encoded)
 
-            # print(decoded)
+            self.assertEqual(expression.pretty_print_string(), decoded.pretty_print_string())
 
 if __name__ == "__main__":
     unittest.main()
