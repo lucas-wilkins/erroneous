@@ -1,9 +1,14 @@
 from __future__ import annotations
 
-from typing import Dict, Any, Optional, Callable, List, Set, Tuple
+from typing import Dict, Any, Optional, Callable, List, Set, Tuple, Type, Union
 
 from fractions import Fraction
 from collections import defaultdict
+from encoding import EncodingSettings, EncodingError, DecodingError
+from data_type_encoding import (
+    EncodableNumber,
+    encode_numeric, decode_numeric_with_size,
+    encode_bytestring, decode_bytestring_with_size)
 
 import numpy as np
 
@@ -11,19 +16,35 @@ import logging
 
 logger = logging.getLogger("expressions")
 
+
+#
+# Errors
+#
+
+
 class NonDifferentiableExpressionError(Exception):
+    """ Differentiation not defined """
     def __init__(self, msg):
         super.__init__(msg)
+
+
+class NoEncodingEntry(Exception):
+    """ No encoding exists for class """
+    def __init__(self, msg):
+        super.__init__(msg)
+
 
 class EvaluationError(Exception):
     """ A problem with evaluating an expression"""
     def __init__(self, msg):
         super().__init__(msg)
 
+
 class SubstitutionError(Exception):
     """ A problem with the substitution procedure"""
     def __init__(self, msg):
         super().__init__(msg)
+
 
 class MatchFailure(Exception):
     """ Exception used to signal that a pattern does not match"""
@@ -77,9 +98,6 @@ class Expression:
 
     def _substitute(self, source_pattern: Expression, target_pattern: Expression) -> Expression:
         raise NotImplementedError(f"{self.__class__.__name__} does not implement _substitute")
-
-    def reduce_constants(self) -> Expression:
-        raise NotImplementedError(f"{self.__class__.__name__} does not implement reduce_constants")
 
     def simplify(self, max_iters=100, debug=False) -> Expression:
         last_expression = self
@@ -318,8 +336,84 @@ class Expression:
     def short_print(self, file=None):
         print(self.short_string(), file=file)
 
+    #
+    # Serialisation
+    #
 
-#TODO: Add support for peicewise combinations
+    def variables(self) -> List[Tuple[bytes, Optional[str]]]:
+
+        alias_lookup = {}
+        for term in self.terms:
+            if isinstance(term, Variable):
+                alias_lookup[term.identity] = term.print_alias
+            else:
+                alias_lookup.update(term.variables())
+
+        sorted_keys = sorted(alias_lookup.keys())
+
+        return [(key, alias_lookup[key]) for key in sorted_keys]
+
+    def serialise(self):
+        variables = self.variables()
+        variable_ids = [v[0] for v in self.variables()]
+        variable_lookup = {var: ind for ind, var in enumerate(variable_ids)}
+        variable_table = encode_variable_table(variables)
+
+        return variable_table + self._serialise(variable_lookup)
+
+    def _serialise(self, variable_lookup: Dict[bytes, int]) -> bytes:
+        if self.__class__ in expression_encoding:
+            return expression_encoding[self.__class__].to_bytes(EncodingSettings.expression_bytes, EncodingSettings.endianness) + \
+                   self._serialisation_details(variable_lookup)
+
+    def _serialisation_details(self, variable_lookup: Dict[bytes, int]) -> bytes:
+        raise NoEncodingEntry(f"No encoding found for class {self.__class__}")
+
+    @staticmethod
+    def deserialise(data: bytes) -> Expression:
+        return Expression.deserialise_with_size(data)[0]
+
+    @staticmethod
+    def deserialise_with_size(data: bytes) -> Tuple[Expression, int]:
+        variable_table, variable_table_length = \
+            decode_variable_table_with_size(data)
+
+        # Create variables
+        variables = [Variable(identity, print_alias)
+                     for identity, print_alias in variable_table]
+
+
+        expr, expr_length = \
+            Expression._deserialise_with_size(
+                data[variable_table_length:],
+                variables)
+
+        return expr, variable_table_length + expr_length
+
+    @staticmethod
+    def _deserialise_with_size(
+            data: bytes,
+            variable_lookup: List[Variable]) -> Tuple[Expression, int]:
+
+        expr_bytes = data[:EncodingSettings.expression_bytes]
+        expr_cls_id = int.from_bytes(expr_bytes, EncodingSettings.endianness, signed=False)
+        expr_cls = expression_decoding[expr_cls_id]
+
+        rest = data[EncodingSettings.expression_bytes:]
+
+        expr, length = expr_cls._create_from_bytes(expr_cls, rest, variable_lookup)
+
+        return expr, EncodingSettings.expression_bytes + length
+
+    @staticmethod
+    def _create_from_bytes(
+            cls: Type[Expression],
+            data: bytes,
+            variable_lookup: List[Variable]) -> Tuple[Expression, int]:
+
+        raise NotImplementedError(f"Cannot instance of '{cls.__name__}' - no implemenation of '_create_from_bytes'")
+
+
 
 #
 # Special Expressions
@@ -328,7 +422,7 @@ class Expression:
 
 class Constant(Expression):
     """ Represents a constant"""
-    def __init__(self, value: Any):
+    def __init__(self, value: EncodableNumber):
         # This should NOT be a subtype of Unary, because it is the result of
         # Expression._sanitise when given a number
         self.value = value
@@ -381,17 +475,44 @@ class Constant(Expression):
     def _reduce_constants(self):
         return self.value
 
+    #
+    # Serialisation
+    #
+
+    def _serialisation_details(self, variable_lookup: Dict[Variable, int]) -> bytes:
+        return encode_numeric(self.value)
+
+    @staticmethod
+    def _create_from_bytes(
+            cls: Type[Expression],
+            data: bytes,
+            variable_lookup: List[Variable]) -> Tuple[Expression, int]:
+
+        number, length = decode_numeric_with_size(data)
+        return Constant(number), length
+
 
 class Variable(Expression):
-    def __init__(self, identity, print_alias: Optional[str]=None):
-        self.identity = identity
-        if print_alias is None:
-            self.print_alias = str(self.identity)
+
+    def __init__(self, identity: Union[bytes, str], print_alias: Optional[str]=None):
+
+        if isinstance(identity, str):
+            self.identity = identity.encode('utf-8')
+        elif isinstance(identity, bytes):
+            self.identity = identity
+
+        # print_alias of none and "" are treated equivalently,
+        # this should match with the serialisation method.
+
+        if print_alias is None or print_alias == "":
+            self.aliased = str(self.identity)
+            self.print_alias = None
         else:
             self.print_alias = print_alias
+            self.aliased = print_alias
 
     def __repr__(self):
-        return self.print_alias
+        return self.aliased
 
     @property
     def terms(self) -> List[Expression]:
@@ -411,7 +532,7 @@ class Variable(Expression):
         return {}
 
     def _pretty_print_lines(self, indent_str: str) -> List[str]:
-        return [self.print_alias]
+        return [self.aliased]
 
     def _diff(self, term: Variable):
         if term.identity == self.identity:
@@ -441,6 +562,32 @@ class Variable(Expression):
 
     def _reduce_constants(self):
         return self
+
+    #
+    # Serialisation
+    #
+
+    def variables(self) -> List[Tuple[bytes, Optional[str]]]:
+        return [(self.identity, self.print_alias)]
+
+    def _serialisation_details(self, variable_lookup: Dict[bytes, int]) -> bytes:
+        return variable_lookup[self.identity].to_bytes(
+            EncodingSettings.variable_index_bytes,
+            EncodingSettings.endianness,
+            signed=False)
+
+    @staticmethod
+    def _create_from_bytes(
+            cls: Type[Expression],
+            data: bytes,
+            variable_lookup: List[Variable]) -> Tuple[Expression, int]:
+
+        variable_index = \
+            int.from_bytes(data[:EncodingSettings.variable_index_bytes],
+                           EncodingSettings.endianness,
+                           signed=False)
+
+        return variable_lookup[variable_index], EncodingSettings.variable_index_bytes
 
 
 class Wildcard(Expression):
@@ -544,6 +691,23 @@ class Unary(Expression):
     def _reduce_constants(self):
         return self.apply(self.a._reduce_constants())
 
+    #
+    # Serialisation
+    #
+
+    def _serialisation_details(self, variable_lookup: Dict[bytes, int]) -> bytes:
+        return self.a._serialise(variable_lookup)
+
+
+    @staticmethod
+    def _create_from_bytes(
+            cls: Type[Unary],
+            data: bytes,
+            variable_lookup: List[Variable]) -> Tuple[Expression, int]:
+
+        a, length = Expression._deserialise_with_size(data, variable_lookup)
+
+        return cls(a), length
 
 
 class NonDunderUnary(Unary):
@@ -621,7 +785,19 @@ class Binary(Expression):
     def _reduce_constants(self):
         return self.apply(self.a._reduce_constants(), self.b._reduce_constants())
 
+    def _serialisation_details(self, variable_lookup: Dict[Variable, int]) -> bytes:
+        return self.a._serialise(variable_lookup) + self.b._serialise(variable_lookup)
 
+    @staticmethod
+    def _create_from_bytes(
+            cls: Type[Binary],
+            data: bytes,
+            variable_lookup: List[Variable]) -> Tuple[Expression, int]:
+
+        a, a_length = Expression._deserialise_with_size(data, variable_lookup)
+        b, b_length = Expression._deserialise_with_size(data[a_length:], variable_lookup)
+
+        return cls(a, b), a_length + b_length
 
 #
 # Standard algabraic operations
@@ -827,6 +1003,7 @@ class Abs(Unary):
     def apply(a):
         return abs(a)
 
+
 class Sign(NonDunderUnary):
     def __init__(self, a: Expression):
         super().__init__(a)
@@ -909,7 +1086,7 @@ w1 = Wildcard(0)
 w2 = Wildcard(1)
 w3 = Wildcard(2)
 
-simplification_substitutions: Tuple[Expression, Expression] = [
+simplification_substitutions: List[Tuple[Expression, Expression]] = [
     (w1 + 0,            w1), # Additive identity -> remove constant
     (0 + w1,            w1),
     (1 * w1,            w1), # Multiplicative identity -> remove constant
@@ -941,5 +1118,97 @@ simplification_substitutions: Tuple[Expression, Expression] = [
     (w1**w2 * w1**w3,   w1**(w2+w3)),   # Exponent rules -> reduce number of exps
     (w1.exp * w2.exp,   (w1+w2).exp),
     (w1.log + w2.log,   (w1*w2).log),   # Log xply rule, reduce number of logs
-
 ]
+
+#
+# Serialisation stuff
+#
+
+
+def _encode_variable_table_entry(identity: bytes, alias: Optional[str]) -> bytes:
+    if alias is None:
+        alias_bytes = encode_bytestring(b'')
+    else:
+        alias_bytes = encode_bytestring(alias.encode('utf-8'))
+
+    return encode_bytestring(identity) + alias_bytes
+
+
+def _decode_variable_table_entry_with_size(data: bytes) -> Tuple[Tuple[bytes, Optional[str]], int]:
+    """ Decode an entry in the variable entry """
+    identity, identity_length = decode_bytestring_with_size(data)
+    alias_bytes, alias_length = decode_bytestring_with_size(data[identity_length:])
+
+    if alias_length == EncodingSettings.bytestring_length_bytes:
+        alias = None
+    else:
+        try:
+            alias = alias_bytes.decode('utf-8')
+        except UnicodeDecodeError as e:
+            raise DecodingError(f"{str(e)} in alias for {str(identity)}: {str(alias_bytes)})")
+
+    return (identity, alias), identity_length + alias_length
+
+def encode_variable_table(variables: List[Tuple[bytes, Optional[str]]]) -> bytes:
+    """ Encode the the variable table """
+
+    n = len(variables)
+    if n > EncodingSettings.variable_index_max:
+        raise EncodingError(f"Too many variables for encoding {n}")
+
+    output_bytes = n.to_bytes(
+        EncodingSettings.variable_index_bytes,
+        EncodingSettings.endianness,
+        signed=False)
+
+    for identity, alias in variables:
+        output_bytes += _encode_variable_table_entry(identity, alias)
+
+    return output_bytes
+
+
+def decode_variable_table_with_size(data: bytes) -> Tuple[List[Tuple[bytes, Optional[str]]], int]:
+    """ Decode the byte representation of the variable table and return size"""
+
+    n_variables = int.from_bytes(
+        data[:EncodingSettings.variable_index_bytes],
+        EncodingSettings.endianness,
+        signed=False)
+
+    table_data = []
+    start_index = EncodingSettings.variable_index_bytes
+    for i in range(n_variables):
+        variable_data, length = _decode_variable_table_entry_with_size(data[start_index:])
+        table_data.append(variable_data)
+        start_index += length
+
+    return table_data, start_index
+
+
+def decode_variable_table(data: bytes) -> List[Tuple[bytes, Optional[str]]]:
+    """ Decode the byte representation of the variable table"""
+    return decode_variable_table_with_size(data)[0]
+
+
+expression_encoding = {
+    Constant: 1,
+    Variable: 2,
+    Plus: 3,
+    Minus: 4,
+    Neg: 5,
+    Times: 6,
+    Divide: 7,
+    Modulo: 8,
+    Power: 9,
+    Exp: 10,
+    Log: 11,
+    Cos: 12,
+    Sin: 13,
+    Abs: 14,
+    Sign: 15,
+}
+
+expression_decoding = {
+    expression_encoding[key]: key
+    for key in expression_encoding}
+
