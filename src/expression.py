@@ -1075,24 +1075,84 @@ class Sin(Unary):
     def _diff(self, term: Variable) -> Expression:
         return self.a.diff(term) * Cos(self.a)
 
-# TODO: Other trig functions
+class Tan(Unary):
+    def __init__(self, a: Expression):
+        super().__init__(a)
 
-class Tan:
-    pass
+    def short_string(self):
+        return f"tan({self.a.short_string()})"
 
-class ArcSin:
-    pass
+    @staticmethod
+    def numerical_apply(a):
+        return np.tan(a)
 
-class ArcCos:
-    pass
+    def _diff(self, term: Variable) -> Expression:
+        return self.a.diff(term) * Power(Cos(self.a), Constant(-2))
 
-class ArcTan:
-    pass
 
-class ArcTan2:
-    pass
+class ArcSin(Unary):
+    def __init__(self, a: Expression):
+        super().__init__(a)
 
-# TODO: Gamma function ecosystem
+    def short_string(self):
+        return f"arcsin({self.a.short_string()})"
+
+    @staticmethod
+    def numerical_apply(a):
+        return np.arcsin(a)
+
+    def _diff(self, term: Variable) -> Expression:
+        return self.a.diff(term) * Power(Minus(Constant(1), Power(self.a, Constant(2))), Constant(0.5))
+
+
+class ArcCos(Unary):
+    def __init__(self, a: Expression):
+        super().__init__(a)
+
+    def short_string(self):
+        return f"arccos({self.a.short_string()})"
+
+    @staticmethod
+    def numerical_apply(a):
+        return np.arccos(a)
+
+    def _diff(self, term: Variable) -> Expression:
+        return self.a.diff(term) * Neg(Power(Minus(Constant(1), Power(self.a, Constant(2))), Constant(0.5)))
+
+class ArcTan(Unary):
+    def __init__(self, a: Expression):
+        super().__init__(a)
+
+    def short_string(self):
+        return f"arctan({self.a.short_string()})"
+
+    @staticmethod
+    def numerical_apply(a):
+        return np.arctan(a)
+
+    def _diff(self, term: Variable) -> Expression:
+        return self.a.diff(term) * Divide(Constant(1), Plus(Constant(1), Power(self.a, Constant(2))))
+
+class ArcTan2(Binary):
+    def __init__(self, a: Expression, b: Expression):
+        super().__init__(a, b)
+
+    def short_string(self):
+        return f"arctan2({self.a.short_string()}, {self.b.short_string()})"
+
+    @staticmethod
+    def numerical_apply(a, b):
+        return np.arctan2(a, b)
+
+    def _diff(self, term: Variable) -> Expression:
+        return Divide(
+                    Divide(self.a, self.b).diff(term),
+                    Plus(Constant(1), Power(Divide(self.a, self.b), Constant(2))))
+
+
+#
+# Gamma function ecosystem
+#
 
 class Gamma(Unary):
     def __init__(self, a: Expression):
@@ -1254,21 +1314,27 @@ def decode_variable_table(data: bytes) -> List[Tuple[bytes, Optional[str]]]:
 expression_encoding = {
     Constant: 1,
     Variable: 2,
-    Plus: 3,
-    Minus: 4,
-    Neg: 5,
-    Times: 6,
-    Divide: 7,
-    Modulo: 8,
-    Power: 9,
-    Exp: 10,
-    Log: 11,
-    Cos: 12,
-    Sin: 13,
-    Abs: 14,
-    Sign: 15,
-    Gamma: 16,
-    Polygamma: 17,
+    Plus: 11,
+    Minus: 12,
+    Neg: 13,
+    Times: 14,
+    Divide: 15,
+    Modulo: 16,
+    Power: 17,
+    Abs: 18,
+    Sign: 19,
+    Exp: 20,
+    Log: 21,
+    Cos: 31,
+    Sin: 32,
+    Tan: 33,
+    ArcSin: 34,
+    ArcCos: 35,
+    ArcTan: 36,
+    ArcTan2: 37,
+    # Hyperbolic functions
+    Gamma: 50,
+    Polygamma: 51,
 }
 
 expression_decoding = {
