@@ -7,7 +7,7 @@ from encoding import EncodingSettings, EncodingError
 
 from hypothesis.extra.numpy import arrays, array_shapes
 
-from expression import Expression, Constant, Variable, Plus, Neg
+from expression import Expression, Constant, Variable, Plus, Neg, Polygamma
 from expression import encode_variable_table, decode_variable_table_with_size
 from parsing import parse_expression
 
@@ -110,6 +110,16 @@ class TestExpressionEncoding(unittest.TestCase):
             decoded = Expression.deserialise(encoded)
 
             self.assertEqual(expression.pretty_print_string(), decoded.pretty_print_string())
+
+    @given(n=st.integers(min_value=1, max_value=50))
+    def test_polygamma(self, n: int):
+        f = Polygamma(Constant(n), Constant(1))
+        encoded = f.serialise()
+        decoded = Expression.deserialise(encoded)
+
+        self.assertEqual(f.pretty_print_string(), decoded.pretty_print_string())
+        self.assertEqual(f.a.value, n)
+
 
 if __name__ == "__main__":
     unittest.main()

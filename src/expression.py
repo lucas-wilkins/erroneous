@@ -4,6 +4,9 @@ from typing import Dict, Any, Optional, Callable, List, Set, Tuple, Type, Union
 
 from fractions import Fraction
 from collections import defaultdict
+
+import scipy.special
+
 from encoding import EncodingSettings, EncodingError, DecodingError
 from data_type_encoding import (
     EncodableNumber,
@@ -105,7 +108,7 @@ class Expression:
         for i in range(max_iters):
 
             # Combine constants where possible
-            new_expression = new_expression.reduce_constants()
+            new_expression = new_expression.reduce()
 
             # TODO: Some regularisation step that allows for commutivity,
             #  and ultimately for simplification of linear combinations
@@ -136,19 +139,33 @@ class Expression:
 
         return last_expression
 
-    def reduce_constants(self):
-        """ Attempt to reduce the prevelance of constants,
-        this basically unwraps the constant values,
-        and evaluates the expressions again"""
-        reduced = self._reduce_constants()
 
-        if isinstance(reduced, Expression):
-            return reduced
+
+    def reduce(self, variable_mapping: Optional[Dict[Union[Variable, str, bytes], EncodableNumber]]=None):
+        """ Numerically evaluate everything that can be evaluated"""
+
+        if variable_mapping is None:
+            reduced = self._reduce({})
         else:
-            # Must be a number
-            return Constant(reduced)
+            variable_id_mapping = {}
+            for key in variable_mapping:
 
-    def _reduce_constants(self):
+                const = Constant(variable_mapping[key])
+
+                if isinstance(key, Variable):
+                    variable_id_mapping[key.identity] = const
+                elif isinstance(key, str):
+                    variable_id_mapping[Variable.string_to_identity(key)] = const
+                elif isinstance(key, bytes):
+                    variable_id_mapping[key] = const
+                else:
+                    raise TypeError("Variable references must be bytes, str, or Variable")
+
+            reduced = self._reduce(variable_id_mapping)
+
+        return reduced
+
+    def _reduce(self, variable_mapping: Dict[bytes, Any]):
         raise NotImplementedError(f"reduce_constants not implemented in {self.__class__.__name__}")
 
     def match(self, expression: Expression) -> Optional[Dict[int, Expression]]:
@@ -472,8 +489,8 @@ class Constant(Expression):
     def full_identity(self, other: Expression) -> bool:
         return other.head == self.head and self.value == other.value
 
-    def _reduce_constants(self):
-        return self.value
+    def _reduce(self, variable_mapping: Dict[bytes, Any]):
+        return self
 
     #
     # Serialisation
@@ -497,7 +514,10 @@ class Variable(Expression):
     def __init__(self, identity: Union[bytes, str], print_alias: Optional[str]=None):
 
         if isinstance(identity, str):
-            self.identity = identity.encode('utf-8')
+            self.identity = Variable.string_to_identity(identity)
+            if print_alias is None:
+                print_alias = identity
+
         elif isinstance(identity, bytes):
             self.identity = identity
 
@@ -510,6 +530,10 @@ class Variable(Expression):
         else:
             self.print_alias = print_alias
             self.aliased = print_alias
+
+    @staticmethod
+    def string_to_identity(string: str):
+        return string.encode('utf-8')
 
     def __repr__(self):
         return self.aliased
@@ -560,9 +584,11 @@ class Variable(Expression):
     def full_identity(self, other: Expression) -> bool:
         return self.head == other.head and self.identity == other.identity
 
-    def _reduce_constants(self):
-        return self
-
+    def _reduce(self, variable_mapping: Dict[bytes, Any]):
+        if self.identity in variable_mapping:
+            return variable_mapping[self.identity]
+        else:
+            return self
     #
     # Serialisation
     #
@@ -630,7 +656,7 @@ class Wildcard(Expression):
     def full_identity(self, other: Expression) -> bool:
         return self.head == other.head and self.number == other.number
 
-    def _reduce_constants(self):
+    def _reduce(self):
         return self
 
 
@@ -682,14 +708,20 @@ class Unary(Expression):
     def full_identity(self, other: Expression) -> bool:
         return self.head == other.head and self.a.full_identity(other.a)
 
-    def apply(self, a):
-        raise NotImplementedError(f"apply not implemented in {self.__class__.__name__}")
+    @staticmethod
+    def numerical_apply(a):
+        raise NotImplementedError(f"apply not implemented in {__class__.__name__}")
 
     def __call__(self, x):
-        return self.apply(self.a(x))
+        return self.numerical_apply(self.a(x))
 
-    def _reduce_constants(self):
-        return self.apply(self.a._reduce_constants())
+    def _reduce(self, variable_mapping: Dict[bytes, Any]):
+        a_reduced = self.a._reduce(variable_mapping)
+        if isinstance(a_reduced, Constant):
+            return Constant(self.numerical_apply(a_reduced.value))
+        else:
+            return self.__class__(a_reduced)
+
 
     #
     # Serialisation
@@ -709,20 +741,6 @@ class Unary(Expression):
 
         return cls(a), length
 
-
-class NonDunderUnary(Unary):
-    """ This is for Expressions based on functions from numpy etc, where the
-    the call it makes isn't via python operations and a dunder"""
-    def _reduce_constants(self):
-        child = self.a._reduce_constants()
-        if isinstance(child, Expression):
-            return self.expr_apply(child)
-        else:
-            return self.apply(child)
-
-    @staticmethod
-    def expr_apply(a: Expression) -> Callable:
-        raise NotImplementedError(f"expr_apply is not implemented in {__class__.__name__}")
 
 
 class Binary(Expression):
@@ -776,16 +794,23 @@ class Binary(Expression):
         return self.head == other.head and self.a.full_identity(other.a) and self.b.full_identity(other.b)
 
     @staticmethod
-    def apply(a, b):
+    def numerical_apply(a, b):
         raise NotImplementedError(f"apply not implemented in {__class__.__name__}")
 
     def __call__(self, x):
-        return self.apply(self.a(x), self.b(x))
+        return self.numerical_apply(self.a(x), self.b(x))
 
-    def _reduce_constants(self):
-        return self.apply(self.a._reduce_constants(), self.b._reduce_constants())
+    def _reduce(self, variable_mapping: Dict[bytes, Any]):
+        a_reduced = self.a._reduce(variable_mapping)
+        b_reduced = self.b._reduce(variable_mapping)
 
-    def _serialisation_details(self, variable_lookup: Dict[Variable, int]) -> bytes:
+        if isinstance(a_reduced, Constant) and isinstance(b_reduced, Constant):
+            return Constant(self.numerical_apply(a_reduced.value, b_reduced.value))
+
+        else:
+            return self.__class__(a_reduced, b_reduced)
+
+    def _serialisation_details(self, variable_lookup: Dict[bytes, int]) -> bytes:
         return self.a._serialise(variable_lookup) + self.b._serialise(variable_lookup)
 
     @staticmethod
@@ -817,7 +842,7 @@ class Plus(Binary):
         return f"({self.a.short_string()} + {self.b.short_string()})"
 
     @staticmethod
-    def apply(a, b):
+    def numerical_apply(a, b):
         return a + b
 
 
@@ -832,7 +857,7 @@ class Minus(Binary):
         return f"({self.a.short_string()} - {self.b.short_string()})"
 
     @staticmethod
-    def apply(a, b):
+    def numerical_apply(a, b):
         return a - b
 
 
@@ -847,7 +872,7 @@ class Neg(Unary):
         return f"-{self.a.short_string()}"
 
     @staticmethod
-    def apply(a):
+    def numerical_apply(a):
         return -a
 
 
@@ -866,7 +891,7 @@ class Times(Binary):
 
 
     @staticmethod
-    def apply(a, b):
+    def numerical_apply(a, b):
         return a * b
 
     def short_string(self):
@@ -892,7 +917,7 @@ class Divide(Binary):
         return f"({self.a.short_string()} / {self.b.short_string()})"
 
     @staticmethod
-    def apply(a, b):
+    def numerical_apply(a, b):
         return a / b
 
 
@@ -907,7 +932,7 @@ class Modulo(Binary):
         return f"({self.a.short_string()} % {self.b.short_string()})"
 
     @staticmethod
-    def apply(a, b):
+    def numerical_apply(a, b):
         return a % b
 
 
@@ -944,10 +969,10 @@ class Power(Binary):
         return f"({self.a.short_string()} ^ {self.b.short_string()})"
 
     @staticmethod
-    def apply(a, b):
+    def numerical_apply(a, b):
         return a ** b
 
-class Exp(NonDunderUnary):
+class Exp(Unary):
     def __init__(self, a: Expression):
         super().__init__(a)
 
@@ -958,7 +983,7 @@ class Exp(NonDunderUnary):
         return f"exp({self.a.short_string()})"
 
     @staticmethod
-    def apply(a):
+    def numerical_apply(a):
         return np.exp(a)
 
     @staticmethod
@@ -966,7 +991,7 @@ class Exp(NonDunderUnary):
         return a.exp
 
 
-class Log(NonDunderUnary):
+class Log(Unary):
     def __init__(self, a: Expression):
         super().__init__(a)
 
@@ -977,12 +1002,8 @@ class Log(NonDunderUnary):
         return f"log({self.a.short_string()})"
 
     @staticmethod
-    def apply(a):
+    def numerical_apply(a):
         return np.log(a)
-
-    @staticmethod
-    def expr_apply(a: Expression):
-        return a.log
 
 
 #
@@ -1000,11 +1021,11 @@ class Abs(Unary):
         return f"abs({self.a.short_string()})"
 
     @staticmethod
-    def apply(a):
-        return abs(a)
+    def numerical_apply(a):
+        return np.abs(a)
 
 
-class Sign(NonDunderUnary):
+class Sign(Unary):
     def __init__(self, a: Expression):
         super().__init__(a)
 
@@ -1012,12 +1033,8 @@ class Sign(NonDunderUnary):
         return f"sign({self.a.short_string()})"
 
     @staticmethod
-    def apply(a):
+    def numerical_apply(a):
         return np.sign(a)
-
-    @staticmethod
-    def expr_apply(a: Expression):
-        return a.sign
 
     @property
     def differentiable(self):
@@ -1028,7 +1045,7 @@ class Sign(NonDunderUnary):
 #
 
 
-class Cos(NonDunderUnary):
+class Cos(Unary):
     def __init__(self, a: Expression):
         super().__init__(a)
 
@@ -1036,18 +1053,14 @@ class Cos(NonDunderUnary):
         return f"cos({self.a.short_string()})"
 
     @staticmethod
-    def apply(a):
+    def numerical_apply(a):
         return np.cos(a)
-
-    @staticmethod
-    def expr_apply(a: Expression):
-        return lambda x: Cos(x)
 
     def _diff(self, term: Variable) -> Expression:
         return -self.a.diff(term) * Sin(self.a)
 
 
-class Sin(NonDunderUnary):
+class Sin(Unary):
     def __init__(self, a: Expression):
         super().__init__(a)
 
@@ -1055,16 +1068,64 @@ class Sin(NonDunderUnary):
         return f"sin({self.a.short_string()})"
 
     @staticmethod
-    def apply(a):
+    def numerical_apply(a):
         return np.sin(a)
-
-    @staticmethod
-    def expr_apply(a: Expression):
-        return lambda x: Sin(x)
 
 
     def _diff(self, term: Variable) -> Expression:
         return self.a.diff(term) * Cos(self.a)
+
+# TODO: Other trig functions
+
+class Tan:
+    pass
+
+class ArcSin:
+    pass
+
+class ArcCos:
+    pass
+
+class ArcTan:
+    pass
+
+class ArcTan2:
+    pass
+
+# TODO: Gamma function ecosystem
+
+class Gamma(Unary):
+    def __init__(self, a: Expression):
+        super().__init__(a)
+
+    def _diff(self, term: Variable):
+        return Times(Polygamma(Constant(0), self.a), Gamma(self.a))
+
+    def short_string(self):
+        return f"Gamma({self.a.short_string()})"
+
+    @staticmethod
+    def numerical_apply(a):
+        return scipy.special.gamma(a)
+
+
+class Polygamma(Binary):
+
+    def __init__(self, a: Expression, b: Expression):
+        super().__init__(a, b)
+
+    def _diff(self, term: Variable):
+        return Polygamma(Plus(self.a, Constant(1)), self.b)
+
+    def short_string(self):
+        return f"polygamma({self.a.short_string()}, {self.b.short_string()})"
+
+    @staticmethod
+    def numerical_apply(a, b):
+        return scipy.special.polygamma(int(a), b)
+
+
+
 
 
 # Simplification rules:
@@ -1206,6 +1267,8 @@ expression_encoding = {
     Sin: 13,
     Abs: 14,
     Sign: 15,
+    Gamma: 16,
+    Polygamma: 17,
 }
 
 expression_decoding = {
